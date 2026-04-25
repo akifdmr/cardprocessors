@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Clover Control Panel</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <div class="shell">
+      <section id="loginView" class="view view-login">
+        <div class="hero-card">
+          <p class="eyebrow">Secure Operations</p>
+          <h1>Clover Control Panel</h1>
+          <p class="hero-copy">
+            Login to manage cards, run provider checks, and review enrollment state with role-based access.
+          </p>
+          <form id="loginForm" class="panel form-grid">
+            <label>
+              <span>Username</span>
+              <input id="loginUsername" name="username" autocomplete="username" required>
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="primary">Login</button>
+            <p id="loginError" class="form-error" hidden></p>
+          </form>
+        </div>
+      </section>
+
+      <section id="appView" class="view" hidden>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Payments Workspace</p>
+            <h2 id="welcomeTitle">Dashboard</h2>
+          </div>
+          <div class="topbar-actions">
+            <div class="identity">
+              <span id="identityName">-</span>
+              <span id="identityRole" class="role-badge">-</span>
+            </div>
+            <button id="logoutButton" class="ghost">Logout</button>
+          </div>
+        </header>
+
+        <main class="dashboard">
+          <section class="panel stats-row">
+            <div>
+              <p class="metric-label">Cards</p>
+              <p id="metricCards" class="metric-value">0</p>
+            </div>
+            <div>
+              <p class="metric-label">Enrolled</p>
+              <p id="metricEnrolled" class="metric-value">0</p>
+            </div>
+            <div>
+              <p class="metric-label">Checks</p>
+              <p id="metricChecks" class="metric-value">0</p>
+            </div>
+          </section>
+
+          <section id="adminUsersPanel" class="panel" hidden>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Admin</p>
+                <h3>Users</h3>
+              </div>
+            </div>
+            <form id="userForm" class="form-grid compact-grid">
+              <label>
+                <span>Username</span>
+                <input name="username" required>
+              </label>
+              <label>
+                <span>Password</span>
+                <input name="password" type="password" required>
+              </label>
+              <label>
+                <span>Display Name</span>
+                <input name="displayName">
+              </label>
+              <label>
+                <span>Role</span>
+                <select name="role">
+                  <option value="operator">operator</option>
+                  <option value="customer">customer</option>
+                  <option value="admin">admin</option>
+                </select>
+              </label>
+              <label class="inline-checkbox">
+                <input name="canBalanceCheck" type="checkbox">
+                <span>Can balance check</span>
+              </label>
+              <label class="inline-checkbox">
+                <input name="canViewBalance" type="checkbox">
+                <span>Can view balance</span>
+              </label>
+              <button type="submit" class="primary">Create User</button>
+            </form>
+            <div id="usersList" class="list-block"></div>
+          </section>
+
+          <section class="two-column">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Create</p>
+                  <h3>Save Card</h3>
+                </div>
+              </div>
+              <form id="cardForm" class="form-grid compact-grid">
+                <label>
+                  <span>Provider</span>
+                  <select name="provider">
+                    <option value="clover">clover</option>
+                    <option value="paypal">paypal</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Provider Token</span>
+                  <input name="providerPaymentToken" required>
+                </label>
+                <label>
+                  <span>Customer Id</span>
+                  <input name="providerCustomerId">
+                </label>
+                <label>
+                  <span>Masked Pan</span>
+                  <input name="maskedPan" placeholder="**** **** **** 4242">
+                </label>
+                <label>
+                  <span>BIN</span>
+                  <input name="first6" maxlength="6">
+                </label>
+                <label>
+                  <span>Last4</span>
+                  <input name="last4" maxlength="4" required>
+                </label>
+                <label>
+                  <span>Brand</span>
+                  <input name="brand">
+                </label>
+                <label>
+                  <span>Exp Month</span>
+                  <input name="expMonth" maxlength="2" required>
+                </label>
+                <label>
+                  <span>Exp Year</span>
+                  <input name="expYear" maxlength="4" required>
+                </label>
+                <label>
+                  <span>Holder Name</span>
+                  <input name="cardholderName">
+                </label>
+                <label>
+                  <span>Address</span>
+                  <input name="billingAddressLine1">
+                </label>
+                <label>
+                  <span>City</span>
+                  <input name="billingCity">
+                </label>
+                <label>
+                  <span>State</span>
+                  <input name="billingState">
+                </label>
+                <label>
+                  <span>ZIP</span>
+                  <input name="billingZip">
+                </label>
+                <label>
+                  <span>Country</span>
+                  <input name="billingCountry">
+                </label>
+                <label>
+                  <span>Auth Check Limit</span>
+                  <input name="authCheckLimit" type="number" step="0.01">
+                </label>
+                <label class="full-span">
+                  <span>Notes</span>
+                  <textarea name="notes" rows="3"></textarea>
+                </label>
+                <button type="submit" class="primary">Save Card</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Selected Card</p>
+                  <h3 id="selectedCardTitle">No card selected</h3>
+                </div>
+              </div>
+              <div id="selectedCardMeta" class="meta-block muted">
+                Select a card from the table to view checks and enrollment actions.
+              </div>
+
+              <form id="checkForm" class="form-grid compact-grid" hidden>
+                <label>
+                  <span>Check Type</span>
+                  <select name="attemptType">
+                    <option value="live_check">live_check</option>
+                    <option value="bin_check">bin_check</option>
+                    <option value="balance_check">balance_check</option>
+                    <option value="auth_check">auth_check</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Provider</span>
+                  <select name="provider">
+                    <option value="clover">clover</option>
+                    <option value="paypal">paypal</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Status</span>
+                  <input name="status" value="queued">
+                </label>
+                <label>
+                  <span>Amount</span>
+                  <input name="amount" type="number" step="0.01">
+                </label>
+                <label>
+                  <span>Currency</span>
+                  <input name="currency" value="USD">
+                </label>
+                <label>
+                  <span>Balance Amount</span>
+                  <input name="balanceAmount" type="number" step="0.01">
+                </label>
+                <label class="full-span">
+                  <span>Raw Response</span>
+                  <textarea name="rawResponse" rows="4" placeholder='{"approved":true}'></textarea>
+                </label>
+                <button type="submit" class="primary">Run Check</button>
+              </form>
+
+              <form id="enrollmentForm" class="form-grid compact-grid" hidden>
+                <label class="full-span">
+                  <span>Enroll Bank URL</span>
+                  <input name="enrollBankUrl">
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input name="username">
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input name="password" type="password">
+                </label>
+                <label>
+                  <span>Holder SSN</span>
+                  <input name="holderSsn">
+                </label>
+                <label>
+                  <span>Holder DOB</span>
+                  <input name="holderDob" placeholder="YYYY-MM-DD">
+                </label>
+                <label class="full-span">
+                  <span>Free Text</span>
+                  <textarea name="freeText" rows="3"></textarea>
+                </label>
+                <button type="submit" class="primary">Save Enrollment</button>
+              </form>
+
+              <div id="enrollmentDetails" class="list-block" hidden></div>
+              <div id="checksList" class="list-block"></div>
+            </section>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Records</p>
+                <h3>Cards</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Masked Pan</th>
+                    <th>Holder</th>
+                    <th>Exp</th>
+                    <th>Status</th>
+                    <th>Enroll</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="cardsTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>
