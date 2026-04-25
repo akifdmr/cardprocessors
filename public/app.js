@@ -4,7 +4,8 @@ const state = {
   cards: [],
   checksByCardId: {},
   selectedCardId: null,
-  users: []
+  users: [],
+  auditLogs: []
 };
 
 const elements = {
@@ -29,8 +30,13 @@ const elements = {
   enrollmentDetails: document.getElementById("enrollmentDetails"),
   adminUsersPanel: document.getElementById("adminUsersPanel"),
   userForm: document.getElementById("userForm"),
-  usersList: document.getElementById("usersList")
+  usersList: document.getElementById("usersList"),
+  auditLogsList: document.getElementById("auditLogsList"),
+  pageSections: document.querySelectorAll("[data-page]"),
+  routeLinks: document.querySelectorAll("[data-route-link]")
 };
+
+const API_PREFIX = "/api";
 
 function setView(loggedIn) {
   elements.loginView.hidden = loggedIn;
@@ -45,7 +51,7 @@ function getHeaders() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(`${API_PREFIX}${path}`, {
     ...options,
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -76,6 +82,7 @@ function logout() {
   state.selectedCardId = null;
   localStorage.removeItem("clover_panel_token");
   setView(false);
+  window.location.hash = "#/";
 }
 
 function can(permission) {
@@ -112,6 +119,26 @@ function updateIdentity() {
   elements.identityName.textContent = state.user.username;
   elements.identityRole.textContent = state.user.role;
   elements.adminUsersPanel.hidden = !can("canManageUsers");
+}
+
+function getCurrentRoute() {
+  const hash = window.location.hash || "#/dashboard";
+  return hash.replace(/^#\//, "") || "dashboard";
+}
+
+function renderRoute() {
+  const route = getCurrentRoute();
+  const allowedRoutes = new Set(["dashboard", "cards", "users", "logs"]);
+  const activeRoute = allowedRoutes.has(route) ? route : "dashboard";
+
+  elements.pageSections.forEach((section) => {
+    const sectionRoute = section.dataset.page;
+    section.hidden = sectionRoute !== activeRoute;
+  });
+
+  elements.routeLinks.forEach((link) => {
+    link.classList.toggle("active", link.dataset.routeLink === activeRoute);
+  });
 }
 
 function updateMetrics() {
@@ -238,6 +265,19 @@ function renderUsers() {
     : `<article class="list-card">No users found.</article>`;
 }
 
+function renderAuditLogs() {
+  elements.auditLogsList.innerHTML = state.auditLogs.length
+    ? state.auditLogs.map((log) => `
+      <article class="list-card">
+        <strong>${escapeHtml(log.action)}</strong> · ${escapeHtml(log.status)}
+        <div>${escapeHtml(log.entity_type)} · ${escapeHtml(log.entity_id || "-")}</div>
+        <div>${escapeHtml(log.created_at)}</div>
+        <pre>${escapeHtml(JSON.stringify(log.details, null, 2))}</pre>
+      </article>
+    `).join("")
+    : `<article class="list-card">No audit logs found.</article>`;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -272,6 +312,11 @@ async function loadUsers() {
   renderUsers();
 }
 
+async function loadAuditLogs() {
+  state.auditLogs = await api("/audit-logs");
+  renderAuditLogs();
+}
+
 async function loadCards() {
   state.cards = await api("/cards");
   renderCards();
@@ -290,6 +335,8 @@ async function bootAuthenticatedApp() {
   updateIdentity();
   await loadUsers();
   await loadCards();
+  await loadAuditLogs();
+  renderRoute();
 }
 
 elements.loginForm.addEventListener("submit", async (event) => {
@@ -306,6 +353,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
 
     state.token = data.token;
     localStorage.setItem("clover_panel_token", state.token);
+    window.location.hash = "#/dashboard";
     await bootAuthenticatedApp();
     elements.loginForm.reset();
   } catch (error) {
@@ -362,6 +410,7 @@ elements.checkForm.addEventListener("submit", async (event) => {
     await loadChecks(card.id);
     updateMetrics();
     renderChecks();
+    await loadAuditLogs();
     elements.checkForm.reset();
   } catch (error) {
     alert(error.message);
@@ -383,6 +432,7 @@ elements.enrollmentForm.addEventListener("submit", async (event) => {
     });
     elements.enrollmentForm.reset();
     await loadCards();
+    await loadAuditLogs();
     if (can("canViewEnrollment")) {
       await loadEnrollment(card.id);
     }
@@ -404,6 +454,7 @@ elements.userForm?.addEventListener("submit", async (event) => {
     });
     elements.userForm.reset();
     await loadUsers();
+    await loadAuditLogs();
   } catch (error) {
     alert(error.message);
   }
@@ -432,6 +483,8 @@ elements.cardsTableBody.addEventListener("click", async (event) => {
     elements.enrollmentForm.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 });
+
+window.addEventListener("hashchange", renderRoute);
 
 (async function init() {
   if (!state.token) {

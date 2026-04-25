@@ -1,4 +1,11 @@
-# CloverApp Backend
+# CloverApp
+
+Bu proje tek uygulama olarak calisir.
+
+- Frontend ayni Node/Express uygulamasindan servis edilir.
+- Backend API ayni process icinde calisir.
+- Yani ayri bir frontend deployment veya ayri bir backend deployment zorunlu degildir.
+- Mimari hedef: tek proje, tek servis, SPA benzeri panel + ayni uygulama icinde API.
 
 Bu proje `.env` üzerinden SQLite ve provider ayarlarını alan basit bir backend iskeletidir.
 
@@ -42,20 +49,22 @@ Uygulama local SQLite veritabani kullanacak sekilde ayarlandi.
 
 ## API uçları
 
+Tum backend endpoint'leri artik `/api` altindadir.
+
 - `GET /health`
-- `POST /auth/login`
-- `GET /auth/me`
-- `POST /users`
-- `GET /config/providers`
-- `GET /audit-logs`
-- `GET /cards`
-- `POST /cards/validate-input`
-- `POST /cards`
-- `POST /cards/:cardId/provider-verification`
-- `GET /cards/:cardId/checks`
-- `POST /cards/:cardId/checks`
-- `GET /cards/:cardId/enrollment`
-- `POST /cards/:cardId/enrollment`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/users`
+- `GET /api/config/providers`
+- `GET /api/audit-logs`
+- `GET /api/cards`
+- `POST /api/cards/validate-input`
+- `POST /api/cards`
+- `POST /api/cards/:cardId/provider-verification`
+- `GET /api/cards/:cardId/checks`
+- `POST /api/cards/:cardId/checks`
+- `GET /api/cards/:cardId/enrollment`
+- `POST /api/cards/:cardId/enrollment`
 
 ## Web panel
 
@@ -64,6 +73,25 @@ Uygulama Express uzerinden statik bir panel de sunar.
 - `GET /` login ekranini aciyor.
 - Giris sonrasi ayni panelde kart listesi, kart ekleme, check formu ve role gore enroll islemleri kullanilabilir.
 - `admin` kullanicilari icin ek olarak kullanici olusturma ve kullanici listesi alani vardir.
+
+## Tek Proje SPA Yapisi
+
+Su anki yapi tek proje mantigina uygundur:
+
+1. `public/` altindaki frontend dosyalari ayni uygulamadan servis edilir.
+2. `src/server.js` hem API endpoint'lerini hem de frontend dosyalarini sunar.
+3. Kullanici tarayicida tek panel gorur.
+4. Panel backend ile ayni origin uzerinden haberlesir.
+5. Bu sayede CORS, ayri frontend sunucusu ve ayri deployment karmasasi olmaz.
+6. Basit SPA navigation hash route ile calisir:
+   `#/dashboard`, `#/cards`, `#/users`, `#/logs`
+
+Mevcut dosya rolleri:
+
+- [public/index.html](/Users/akifdemir/Desktop/Projects/CloverApp/public/index.html): SPA giris noktasi
+- [public/app.js](/Users/akifdemir/Desktop/Projects/CloverApp/public/app.js): panel mantigi
+- [public/app.css](/Users/akifdemir/Desktop/Projects/CloverApp/public/app.css): panel stili
+- [src/server.js](/Users/akifdemir/Desktop/Projects/CloverApp/src/server.js): ayni uygulama icinde frontend + API servis katmani
 
 ## Safe Intake Flow
 

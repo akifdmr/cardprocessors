@@ -122,7 +122,7 @@ const openApiDocument = {
     }
   },
   paths: {
-    "/auth/login": {
+    "/api/auth/login": {
       post: {
         summary: "Login",
         requestBody: {
@@ -138,7 +138,7 @@ const openApiDocument = {
         }
       }
     },
-    "/cards": {
+    "/api/cards": {
       get: {
         summary: "List cards",
         security: [{ bearerAuth: [] }],
@@ -158,7 +158,7 @@ const openApiDocument = {
         responses: { 201: { description: "Created" } }
       }
     },
-    "/cards/validate-input": {
+    "/api/cards/validate-input": {
       post: {
         summary: "Run local card-input validation without storing PAN",
         security: [{ bearerAuth: [] }],
@@ -173,7 +173,7 @@ const openApiDocument = {
         responses: { 200: { description: "Validation result" } }
       }
     },
-    "/cards/{cardId}/provider-verification": {
+    "/api/cards/{cardId}/provider-verification": {
       post: {
         summary: "Record provider-side verification outcome for a stored tokenized card",
         security: [{ bearerAuth: [] }],
@@ -196,7 +196,7 @@ const openApiDocument = {
         responses: { 200: { description: "Verification recorded" } }
       }
     },
-    "/audit-logs": {
+    "/api/audit-logs": {
       get: {
         summary: "List audit logs",
         security: [{ bearerAuth: [] }],
@@ -340,7 +340,7 @@ app.get("/health", asyncHandler(async (_req, res) => {
 
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
-app.post("/auth/login", asyncHandler(async (req, res) => {
+app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: "username and password are required" });
@@ -365,7 +365,7 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
   });
 }));
 
-app.get("/auth/me", requireAuth, (req, res) => {
+app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({
     id: req.user.id,
     username: req.user.username,
@@ -376,7 +376,7 @@ app.get("/auth/me", requireAuth, (req, res) => {
   });
 });
 
-app.get("/audit-logs", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+app.get("/api/audit-logs", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
   const logs = await listAuditLogs({
     entityType: req.query.entityType || null,
     entityId: req.query.entityId || null,
@@ -386,7 +386,7 @@ app.get("/audit-logs", requireAuth, requirePermission("canListCards"), asyncHand
   res.json(logs);
 }));
 
-app.get("/users", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (_req, res) => {
+app.get("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (_req, res) => {
   const result = await query(
     `select
       id,
@@ -405,7 +405,7 @@ app.get("/users", requireAuth, requirePermission("canManageUsers"), asyncHandler
   res.json(result.rows);
 }));
 
-app.post("/users", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (req, res) => {
+app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (req, res) => {
   const {
     username,
     password,
@@ -449,11 +449,11 @@ app.post("/users", requireAuth, requirePermission("canManageUsers"), asyncHandle
   res.status(201).json({ id: result.rows[0].id });
 }));
 
-app.get("/config/providers", requireAuth, (_req, res) => {
+app.get("/api/config/providers", requireAuth, (_req, res) => {
   res.json(getPublicProviderConfig());
 });
 
-app.get("/cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+app.get("/api/cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
   const result = await query(
     `select
       id,
@@ -488,7 +488,7 @@ app.get("/cards", requireAuth, requirePermission("canListCards"), asyncHandler(a
   res.json(result.rows);
 }));
 
-app.post("/cards", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
   const {
     provider,
     providerCustomerId,
@@ -596,7 +596,7 @@ app.post("/cards", requireAuth, requirePermission("canCreateCards"), asyncHandle
   res.status(201).json({ id: result.rows[0].id });
 }));
 
-app.post("/cards/validate-input", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+app.post("/api/cards/validate-input", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
   const {
     pan,
     expMonth,
@@ -636,7 +636,7 @@ app.post("/cards/validate-input", requireAuth, requirePermission("canCreateCards
   });
 }));
 
-app.post("/cards/:cardId/provider-verification", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
   const {
     provider,
     verificationStatus,
@@ -695,7 +695,7 @@ app.post("/cards/:cardId/provider-verification", requireAuth, requirePermission(
   });
 }));
 
-app.post("/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
+app.post("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
   const {
     provider,
     attemptType,
@@ -769,7 +769,7 @@ app.post("/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => 
   res.status(201).json(response);
 }));
 
-app.get("/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
+app.get("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
   const result = await query(
     `select
       id,
@@ -807,7 +807,7 @@ app.get("/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 
-app.get("/cards/:cardId/enrollment", requireAuth, requirePermission("canViewEnrollment"), asyncHandler(async (req, res) => {
+app.get("/api/cards/:cardId/enrollment", requireAuth, requirePermission("canViewEnrollment"), asyncHandler(async (req, res) => {
   const result = await query(
     `select
       id,
@@ -846,7 +846,7 @@ app.get("/cards/:cardId/enrollment", requireAuth, requirePermission("canViewEnro
   });
 }));
 
-app.post("/cards/:cardId/enrollment", requireAuth, asyncHandler(async (req, res) => {
+app.post("/api/cards/:cardId/enrollment", requireAuth, asyncHandler(async (req, res) => {
   const {
     enrollBankUrl,
     username,

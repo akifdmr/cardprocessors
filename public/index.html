@@ -45,8 +45,15 @@
           </div>
         </header>
 
+        <nav class="app-nav panel">
+          <a href="#/dashboard" data-route-link="dashboard" class="nav-link">Dashboard</a>
+          <a href="#/cards" data-route-link="cards" class="nav-link">Cards</a>
+          <a href="#/users" data-route-link="users" class="nav-link">Users</a>
+          <a href="#/logs" data-route-link="logs" class="nav-link">Logs</a>
+        </nav>
+
         <main class="dashboard">
-          <section class="panel stats-row">
+          <section class="panel stats-row" data-page="dashboard">
             <div>
               <p class="metric-label">Cards</p>
               <p id="metricCards" class="metric-value">0</p>
@@ -61,7 +68,7 @@
             </div>
           </section>
 
-          <section id="adminUsersPanel" class="panel" hidden>
+          <section id="adminUsersPanel" class="panel" data-page="users" hidden>
             <div class="section-head">
               <div>
                 <p class="eyebrow">Admin</p>
@@ -102,7 +109,7 @@
             <div id="usersList" class="list-block"></div>
           </section>
 
-          <section class="two-column">
+          <section class="two-column" data-page="cards">
             <section class="panel">
               <div class="section-head">
                 <div>
@@ -270,7 +277,7 @@
             </section>
           </section>
 
-          <section class="panel">
+          <section class="panel" data-page="cards">
             <div class="section-head">
               <div>
                 <p class="eyebrow">Records</p>
@@ -293,6 +300,16 @@
                 <tbody id="cardsTableBody"></tbody>
               </table>
             </div>
+          </section>
+
+          <section class="panel" data-page="logs">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Audit</p>
+                <h3>Logs</h3>
+              </div>
+            </div>
+            <div id="auditLogsList" class="list-block"></div>
           </section>
         </main>
       </section>

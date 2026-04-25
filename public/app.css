@@ -103,6 +103,27 @@ h3 {
   margin-bottom: 20px;
 }
 
+.app-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--ink);
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(32, 35, 25, 0.06);
+}
+
+.nav-link.active {
+  background: var(--accent);
+  color: white;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
