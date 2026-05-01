@@ -7,10 +7,17 @@ const { encrypt, decrypt } = require("./crypto");
 const { getPublicProviderConfig } = require("./providers");
 const { validateCardInput } = require("./services/cardValidationService");
 const { listAuditLogs, writeAuditLog } = require("./services/auditService");
+const cloverService = require("./services/cloverService");
+const paypalService = require("./services/paypalService");
+const providerRouter = require("./services/providerRouter");
+const twilioVoiceService = require("./services/twilioVoiceService");
+const numberService = require("./services/numberService");
+const { getProviderMessage, isAxiosError, toSafeErrorLog } = require("./utils/errorUtils");
 const maskRoutes = require("./routers/maskRoutes");
 const numberRoutes = require("./routers/numberRoutes");
 const callRoutes = require("./routers/callRoutes");
 const {
+  SESSION_COOKIE_NAME,
   authenticate,
   createSession,
   ensureBootstrapAdmin,
@@ -22,6 +29,7 @@ const {
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.resolve(process.cwd(), "public")));
 
 const openApiDocument = {
@@ -118,6 +126,94 @@ const openApiDocument = {
           authResultCode: { type: "string" },
           notes: { type: "string" }
         }
+      },
+      CloverPreAuthRequest: {
+        type: "object",
+        required: ["source", "amount"],
+        properties: {
+          source: {
+            type: "string",
+            description: "Tokenized Clover payment source"
+          },
+          amount: {
+            type: "integer",
+            description: "Amount in cents"
+          },
+          currency: {
+            type: "string",
+            default: "usd"
+          }
+        }
+      },
+      CloverRefundRequest: {
+        type: "object",
+        required: ["orderId", "amount"],
+        properties: {
+          orderId: { type: "string" },
+          amount: {
+            type: "integer",
+            description: "Refund amount in cents"
+          },
+          currency: {
+            type: "string",
+            default: "usd"
+          }
+        }
+      },
+      CloverVoidRequest: {
+        type: "object",
+        required: ["paymentId"],
+        properties: {
+          paymentId: { type: "string" },
+          voidReason: {
+            type: "string",
+            default: "USER_CANCEL"
+          }
+        }
+      },
+      CallInitiateRequest: {
+        type: "object",
+        required: ["realFrom", "realTo"],
+        properties: {
+          realFrom: { type: "string" },
+          realTo: { type: "string" }
+        }
+      },
+      PayPalManagerInquiryRequest: {
+        type: "object",
+        properties: {
+          origId: { type: "string" },
+          custRef: { type: "string" },
+          startTime: { type: "string" },
+          endTime: { type: "string" }
+        }
+      },
+      PayPalCardCheckRequest: {
+        type: "object",
+        required: ["cardId", "pan", "expMonth", "expYear"],
+        properties: {
+          cardId: { type: "string" },
+          pan: { type: "string" },
+          expMonth: { type: "string" },
+          expYear: { type: "string" },
+          cvv2: { type: "string" },
+          amount: { type: "number" },
+          cardholderName: { type: "string" },
+          billingAddressLine1: { type: "string" },
+          billingZip: { type: "string" },
+          invoiceNumber: { type: "string" },
+          comment: { type: "string" }
+        }
+      },
+      PayPalCaptureRequest: {
+        type: "object",
+        required: ["amount"],
+        properties: {
+          cardId: { type: "string" },
+          authorizationPnref: { type: "string" },
+          amount: { type: "number" },
+          captureComplete: { type: "boolean" }
+        }
       }
     }
   },
@@ -201,6 +297,196 @@ const openApiDocument = {
         summary: "List audit logs",
         security: [{ bearerAuth: [] }],
         responses: { 200: { description: "Audit log list" } }
+      }
+    },
+    "/api/provider-router/status": {
+      get: {
+        summary: "Get voice provider router status",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Provider router status" } }
+      }
+    },
+    "/api/providers/twilio/test": {
+      get: {
+        summary: "Test Twilio account credentials and call configuration",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Twilio connection status" } }
+      }
+    },
+    "/api/providers/clover/test": {
+      get: {
+        summary: "Test Clover connection",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Clover connection status" } }
+      }
+    },
+    "/api/providers/clover/merchant": {
+      get: {
+        summary: "Get Clover merchant info",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Clover merchant" } }
+      }
+    },
+    "/api/providers/clover/orders": {
+      get: {
+        summary: "List Clover orders",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Clover orders" } }
+      }
+    },
+    "/api/providers/clover/payments": {
+      get: {
+        summary: "List Clover payments",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Clover payments" } }
+      }
+    },
+    "/api/providers/clover/preauth": {
+      post: {
+        summary: "Create a Clover pre-authorization using a tokenized source",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CloverPreAuthRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "Clover pre-authorization result" } }
+      }
+    },
+    "/api/providers/clover/refund": {
+      post: {
+        summary: "Create a Clover refund for a settled order",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CloverRefundRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "Clover refund result" } }
+      }
+    },
+    "/api/providers/clover/void": {
+      post: {
+        summary: "Void a Clover payment using device APIs",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CloverVoidRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "Clover void result" } }
+      }
+    },
+    "/api/providers/clover/tenders": {
+      get: {
+        summary: "List Clover tenders",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "Clover tenders" } }
+      }
+    },
+    "/api/providers/paypal/rest/test": {
+      get: {
+        summary: "Test PayPal REST OAuth credentials",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "PayPal REST connection status" } }
+      }
+    },
+    "/api/providers/paypal/manager/status": {
+      get: {
+        summary: "Get PayPal Manager configuration status",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "PayPal Manager configuration status" } }
+      }
+    },
+    "/api/providers/paypal/manager/test": {
+      post: {
+        summary: "Probe PayPal Manager credentials with a non-monetary inquiry request",
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: "PayPal Manager credential probe result" } }
+      }
+    },
+    "/api/providers/paypal/manager/inquiry": {
+      post: {
+        summary: "Run a PayPal Manager transaction inquiry by PNREF or CUSTREF",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayPalManagerInquiryRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "PayPal Manager inquiry result" } }
+      }
+    },
+    "/api/providers/paypal/manager/cards/live-check": {
+      post: {
+        summary: "Run a PayPal Manager live card check without storing PAN or CVV",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayPalCardCheckRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "PayPal Manager live check result" } }
+      }
+    },
+    "/api/providers/paypal/manager/cards/bin-check": {
+      post: {
+        summary: "Run a PayPal card BIN check without storing PAN or CVV",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayPalCardCheckRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "PayPal BIN check result" } }
+      }
+    },
+    "/api/providers/paypal/manager/cards/auth": {
+      post: {
+        summary: "Authorize a card with PayPal Manager and store the PNREF for later capture",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayPalCardCheckRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "PayPal Manager authorization result" } }
+      }
+    },
+    "/api/providers/paypal/manager/cards/capture": {
+      post: {
+        summary: "Capture a previous PayPal Manager authorization by PNREF or latest card auth",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayPalCaptureRequest" }
+            }
+          }
+        },
+        responses: { 200: { description: "PayPal Manager capture result" } }
       }
     },
     "/api/masks/create": {
@@ -293,7 +579,7 @@ const openApiDocument = {
           required: true,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/MaskCreateRequest" }
+              schema: { $ref: "#/components/schemas/CallInitiateRequest" }
             }
           }
         },
@@ -307,6 +593,36 @@ function asyncHandler(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function getSessionCookieParts({ token = "", maxAgeSeconds = 0 } = {}) {
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Strict",
+    `Max-Age=${maxAgeSeconds}`
+  ];
+
+  if (env.nodeEnv === "production") {
+    parts.push("Secure");
+  }
+
+  return parts;
+}
+
+function setSessionCookie(res, token) {
+  res.setHeader("Set-Cookie", getSessionCookieParts({
+    token,
+    maxAgeSeconds: 7 * 24 * 60 * 60
+  }).join("; "));
+}
+
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", getSessionCookieParts({
+    token: "",
+    maxAgeSeconds: 0
+  }).join("; "));
 }
 
 function serializeRawResponse(rawResponse) {
@@ -333,6 +649,87 @@ function deserializeRawResponse(rawResponse) {
   }
 }
 
+function serializeCardForList(card) {
+  return {
+    id: card.id,
+    provider: card.provider,
+    masked_pan: card.masked_pan,
+    last4: card.last4,
+    brand: card.brand,
+    exp_month: card.exp_month,
+    exp_year: card.exp_year,
+    cardholder_name: card.cardholder_name,
+    auth_check_limit: card.auth_check_limit,
+    is_enrolled: Boolean(card.is_enrolled),
+    verification_status: card.verification_status,
+    masking_number: card.masking_number,
+    masking_number_verified: Boolean(card.masking_number_verified),
+    created_at: card.created_at,
+    updated_at: card.updated_at
+  };
+}
+
+function escapeXml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+async function ensureCardExists(cardId) {
+  const result = await query("select id from cards where id = $1", [cardId]);
+  if (result.rowCount === 0) {
+    const error = new Error("Card not found");
+    error.statusCode = 404;
+    throw error;
+  }
+}
+
+async function getLatestPayPalAuthPnref(cardId) {
+  const result = await query(
+    `select provider_reference_id
+    from verification_attempts
+    where card_id = $1
+      and provider = 'paypal'
+      and attempt_type = 'auth_check'
+      and status = 'approved'
+      and provider_reference_id is not null
+    order by created_at desc
+    limit 1`,
+    [cardId]
+  );
+
+  return result.rows[0]?.provider_reference_id || null;
+}
+
+function requirePayPalManagerConfigured(res) {
+  const status = paypalService.getManagerStatus();
+  if (!status.configured) {
+    res.status(400).json({
+      error: "PayPal Manager configuration is incomplete",
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function requirePayPalNvpConfigured(res) {
+  const status = paypalService.getNvpStatus();
+  if (!status.configured) {
+    res.status(400).json({
+      error: "PayPal NVP/SOAP configuration is incomplete",
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
 app.get("/health", asyncHandler(async (_req, res) => {
   await query("select 1");
   res.json({ ok: true });
@@ -352,8 +749,8 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   }
 
   const session = await createSession(user.id);
+  setSessionCookie(res, session.token);
   res.json({
-    token: session.token,
     expiresAt: session.expiresAt,
     user: {
       id: user.id,
@@ -365,6 +762,11 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   });
 }));
 
+app.post("/api/auth/logout", (_req, res) => {
+  clearSessionCookie(res);
+  res.json({ success: true });
+});
+
 app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({
     id: req.user.id,
@@ -375,6 +777,578 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
     session: req.session
   });
 });
+
+app.get("/api/provider-router/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json({
+    primaryProvider: process.env.PRIMARY_PROVIDER || "TWILIO",
+    providers: Object.entries(providerRouter.providers).map(([key, provider]) => ({
+      key,
+      name: provider.name,
+      supportsUnverified: provider.supportsUnverified
+    })),
+    browserVoice: twilioVoiceService.getVoiceStatus()
+  });
+}));
+
+app.get("/api/voice/token", requireAuth, requirePermission("canRunLiveCheck"), asyncHandler(async (req, res) => {
+  res.json(twilioVoiceService.createVoiceAccessToken(req.user.username));
+}));
+
+app.all("/api/voice/twiml", asyncHandler(async (req, res) => {
+  const cardId = req.body.cardId || req.query.cardId;
+  const realTo = req.body.realTo || req.query.realTo || req.body.To || req.query.To;
+
+  if (!cardId || !realTo) {
+    res.type("text/xml").status(400).send("<Response><Reject/></Response>");
+    return;
+  }
+
+  const cardNumber = await numberService.getPrimaryNumberByCard(cardId);
+  if (!cardNumber) {
+    res.type("text/xml").status(404).send("<Response><Reject/></Response>");
+    return;
+  }
+
+  const callerId = cardNumber.phoneNumber;
+
+  if (!callerId) {
+    res.type("text/xml").status(400).send("<Response><Reject/></Response>");
+    return;
+  }
+
+  res.type("text/xml").send(
+    `<Response><Dial callerId="${escapeXml(callerId)}"><Number>${escapeXml(realTo)}</Number></Dial></Response>`
+  );
+}));
+
+app.get("/api/providers/twilio/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await providerRouter.testTwilioConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "twilio",
+    action: "twilio_connection_test",
+    status: result.ok ? "success" : "failed",
+    actorUserId: req.user.id,
+    details: {
+      configured: result.configured,
+      missing: result.missing || [],
+      status: result.status || null,
+      type: result.type || null,
+      fromNumber: result.fromNumber || null
+    }
+  });
+  res.status(result.ok ? 200 : 400).json(result);
+}));
+
+app.get("/api/providers/clover/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await cloverService.testConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_connection_test",
+    status: "success",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.json(result);
+}));
+
+app.get("/api/providers/clover/merchant", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const merchant = await cloverService.getMerchant();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_merchant_fetch",
+    status: "success",
+    actorUserId: req.user.id,
+    details: {
+      merchantId: merchant.id,
+      merchantName: merchant.name
+    }
+  });
+  res.json(merchant);
+}));
+
+app.get("/api/providers/clover/orders", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const limit = Number(req.query.limit || 20);
+  const orders = await cloverService.listOrders(limit);
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_orders_fetch",
+    status: "success",
+    actorUserId: req.user.id,
+    details: { limit }
+  });
+  res.json(orders);
+}));
+
+app.get("/api/providers/clover/payments", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const limit = Number(req.query.limit || 20);
+  const payments = await cloverService.listPayments(limit);
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_payments_fetch",
+    status: "success",
+    actorUserId: req.user.id,
+    details: { limit }
+  });
+  res.json(payments);
+}));
+
+app.post("/api/providers/clover/preauth", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const {
+    source,
+    amount,
+    currency = "usd"
+  } = req.body;
+
+  const result = await cloverService.createPreAuthorization({
+    source,
+    amount: Number(amount),
+    currency
+  });
+
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_preauth_create",
+    status: "success",
+    actorUserId: req.user.id,
+    details: {
+      amount: Number(amount),
+      currency: String(currency).toLowerCase(),
+      cloverChargeId: result.id || null,
+      paid: result.paid ?? null,
+      captured: result.captured ?? null
+    }
+  });
+
+  res.json(result);
+}));
+
+app.post("/api/providers/clover/refund", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const {
+    orderId,
+    amount,
+    currency = "usd"
+  } = req.body;
+
+  const result = await cloverService.refundOrder({
+    orderId,
+    amount: Number(amount),
+    currency
+  });
+
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_refund_create",
+    status: "success",
+    actorUserId: req.user.id,
+    details: {
+      orderId,
+      amount: Number(amount),
+      currency: String(currency).toLowerCase()
+    }
+  });
+
+  res.json(result);
+}));
+
+app.post("/api/providers/clover/void", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const {
+    paymentId,
+    voidReason = "USER_CANCEL"
+  } = req.body;
+
+  const result = await cloverService.voidPayment({
+    paymentId,
+    voidReason
+  });
+
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_void_create",
+    status: "success",
+    actorUserId: req.user.id,
+    details: {
+      paymentId,
+      voidReason
+    }
+  });
+
+  res.json(result);
+}));
+
+app.get("/api/providers/clover/tenders", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const tenders = await cloverService.listTenders();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "clover",
+    action: "clover_tenders_fetch",
+    status: "success",
+    actorUserId: req.user.id,
+    details: {
+      count: Array.isArray(tenders.elements) ? tenders.elements.length : null
+    }
+  });
+  res.json(tenders);
+}));
+
+app.get("/api/providers/paypal/rest/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await paypalService.testRestConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "paypal",
+    action: "paypal_rest_connection_test",
+    status: "success",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.json(result);
+}));
+
+app.get("/api/providers/paypal/manager/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json({
+    manager: paypalService.getManagerStatus(),
+    nvp: paypalService.getNvpStatus()
+  });
+}));
+
+app.post("/api/providers/paypal/manager/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requirePayPalManagerConfigured(res)) {
+    return;
+  }
+
+  const result = await paypalService.testManagerConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "paypal-manager",
+    action: "paypal_manager_connection_test",
+    status: result.ok ? "success" : "failed",
+    actorUserId: req.user.id,
+    details: {
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage
+    }
+  });
+  res.json(result);
+}));
+
+app.post("/api/providers/paypal/nvp/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requirePayPalNvpConfigured(res)) {
+    return;
+  }
+
+  const result = await paypalService.testNvpConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "paypal-nvp",
+    action: "paypal_nvp_connection_test",
+    status: result.ok ? "success" : "failed",
+    actorUserId: req.user.id,
+    details: {
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      correlationId: result.correlationId
+    }
+  });
+  res.json(result);
+}));
+
+app.post("/api/providers/paypal/manager/inquiry", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requirePayPalManagerConfigured(res)) {
+    return;
+  }
+
+  const result = await paypalService.inquireManagerTransaction({
+    origId: req.body.origId || null,
+    custRef: req.body.custRef || null,
+    startTime: req.body.startTime || null,
+    endTime: req.body.endTime || null
+  });
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "paypal-manager",
+    action: "paypal_manager_inquiry",
+    status: result.RESULT === "0" ? "success" : "failed",
+    actorUserId: req.user.id,
+    details: {
+      resultCode: result.RESULT || null,
+      responseMessage: result.RESPMSG || null,
+      pnref: result.PNREF || null
+    }
+  });
+  res.json(result);
+}));
+
+app.post("/api/providers/paypal/manager/cards/live-check", requireAuth, requirePermission("canRunLiveCheck"), asyncHandler(async (req, res) => {
+  if (!requirePayPalManagerConfigured(res)) {
+    return;
+  }
+
+  const { cardId } = req.body;
+  if (!cardId) {
+    return res.status(400).json({ error: "cardId is required" });
+  }
+
+  await ensureCardExists(cardId);
+  const result = await paypalService.liveCheckCard(req.body);
+
+  await query(
+    `insert into verification_attempts (
+      card_id,
+      provider,
+      attempt_type,
+      status,
+      amount,
+      currency,
+      provider_reference_id,
+      raw_response,
+      created_by_user_id
+    ) values ($1, 'paypal', 'live_check', $2, $3, 'USD', $4, $5, $6)`,
+    [
+      cardId,
+      result.status,
+      result.amount,
+      result.pnref,
+      serializeRawResponse({
+        resultCode: result.resultCode,
+        responseMessage: result.responseMessage,
+        authCode: result.authCode,
+        avsAddress: result.avsAddress,
+        avsZip: result.avsZip,
+        cvv2Match: result.cvv2Match,
+        card: result.card
+      }),
+      req.user.id
+    ]
+  );
+
+  await writeAuditLog({
+    entityType: "card",
+    entityId: cardId,
+    action: "paypal_manager_live_check",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: {
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      pnref: result.pnref,
+      amount: result.amount,
+      card: result.card
+    }
+  });
+
+  res.json({
+    status: result.status,
+    resultCode: result.resultCode,
+    responseMessage: result.responseMessage,
+    pnref: result.pnref,
+    authCode: result.authCode,
+    avsAddress: result.avsAddress,
+    avsZip: result.avsZip,
+    cvv2Match: result.cvv2Match,
+    amount: result.amount,
+    card: result.card
+  });
+}));
+
+app.post("/api/providers/paypal/manager/cards/bin-check", requireAuth, requirePermission("canRunBinCheck"), asyncHandler(async (req, res) => {
+  const { cardId } = req.body;
+  if (!cardId) {
+    return res.status(400).json({ error: "cardId is required" });
+  }
+
+  await ensureCardExists(cardId);
+  const result = paypalService.binCheckCard(req.body);
+
+  await query(
+    `insert into verification_attempts (
+      card_id,
+      provider,
+      attempt_type,
+      status,
+      currency,
+      raw_response,
+      created_by_user_id
+    ) values ($1, 'paypal', 'bin_check', $2, 'USD', $3, $4)`,
+    [
+      cardId,
+      result.status,
+      serializeRawResponse(result),
+      req.user.id
+    ]
+  );
+
+  await writeAuditLog({
+    entityType: "card",
+    entityId: cardId,
+    action: "paypal_bin_check",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: result
+  });
+
+  res.json(result);
+}));
+
+app.post("/api/providers/paypal/manager/cards/auth", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  if (!requirePayPalNvpConfigured(res)) {
+    return;
+  }
+
+  const { cardId } = req.body;
+  if (!cardId) {
+    return res.status(400).json({ error: "cardId is required" });
+  }
+
+  await ensureCardExists(cardId);
+  const result = await paypalService.authorizeCardNvp({
+    ...req.body,
+    ipAddress: req.ip
+  });
+
+  await query(
+    `insert into verification_attempts (
+      card_id,
+      provider,
+      attempt_type,
+      status,
+      amount,
+      currency,
+      provider_reference_id,
+      raw_response,
+      created_by_user_id
+    ) values ($1, 'paypal', 'auth_check', $2, $3, 'USD', $4, $5, $6)`,
+    [
+      cardId,
+      result.status,
+      result.amount,
+      result.pnref,
+      serializeRawResponse({
+        processor: result.processor,
+        resultCode: result.resultCode,
+        responseMessage: result.responseMessage,
+        authCode: result.authCode,
+        avsAddress: result.avsAddress,
+        avsZip: result.avsZip,
+        cvv2Match: result.cvv2Match,
+        card: result.card
+      }),
+      req.user.id
+    ]
+  );
+
+  await query(
+    `update cards
+    set
+      provider = 'paypal',
+      provider_reference_id = coalesce($1, provider_reference_id),
+      avs_result = coalesce($2, avs_result),
+      auth_result_code = coalesce($3, auth_result_code),
+      verification_status = $4,
+      updated_at = current_timestamp
+    where id = $5`,
+    [
+      result.pnref,
+      result.avsZip || result.avsAddress || null,
+      result.authCode || result.resultCode || null,
+      result.status === "approved" ? "verified" : result.status === "review" ? "review" : "declined",
+      cardId
+    ]
+  );
+
+  await writeAuditLog({
+    entityType: "card",
+    entityId: cardId,
+    action: "paypal_nvp_authorize",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: {
+      processor: result.processor,
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      authorizationId: result.pnref,
+      amount: result.amount,
+      card: result.card
+    }
+  });
+
+  res.json({
+    status: result.status,
+    resultCode: result.resultCode,
+    responseMessage: result.responseMessage,
+    authorizationPnref: result.pnref,
+    authorizationId: result.pnref,
+    processor: result.processor,
+    authCode: result.authCode,
+    avsAddress: result.avsAddress,
+    avsZip: result.avsZip,
+    cvv2Match: result.cvv2Match,
+    amount: result.amount,
+    card: result.card,
+    captureReady: result.status === "approved" && Boolean(result.pnref)
+  });
+}));
+
+app.post("/api/providers/paypal/manager/cards/capture", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  if (!requirePayPalNvpConfigured(res)) {
+    return;
+  }
+
+  const { cardId, amount, captureComplete = true } = req.body;
+  let authorizationPnref = req.body.authorizationPnref || null;
+
+  if (!authorizationPnref && cardId) {
+    await ensureCardExists(cardId);
+    authorizationPnref = await getLatestPayPalAuthPnref(cardId);
+  }
+
+  if (!authorizationPnref) {
+    return res.status(400).json({
+      error: "authorizationPnref is required when no approved PayPal auth exists for cardId"
+    });
+  }
+
+  const result = await paypalService.captureAuthorizationNvp({
+    authorizationPnref,
+    amount,
+    captureComplete
+  });
+
+  await writeAuditLog({
+    entityType: "card",
+    entityId: cardId || authorizationPnref,
+    action: "paypal_nvp_capture",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: {
+      processor: result.processor,
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      originalPnref: result.originalPnref,
+      capturePnref: result.pnref,
+      amount: result.amount,
+      captureComplete: result.captureComplete
+    }
+  });
+
+  res.json({
+    status: result.status,
+    resultCode: result.resultCode,
+    responseMessage: result.responseMessage,
+    originalPnref: result.originalPnref,
+    capturePnref: result.pnref,
+    processor: result.processor,
+    authCode: result.authCode,
+    amount: result.amount,
+    captureComplete: result.captureComplete
+  });
+}));
 
 app.get("/api/audit-logs", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
   const logs = await listAuditLogs({
@@ -449,7 +1423,7 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
   res.status(201).json({ id: result.rows[0].id });
 }));
 
-app.get("/api/config/providers", requireAuth, (_req, res) => {
+app.get("/api/config/providers", requireAuth, requirePermission("canListCards"), (_req, res) => {
   res.json(getPublicProviderConfig());
 });
 
@@ -485,7 +1459,7 @@ app.get("/api/cards", requireAuth, requirePermission("canListCards"), asyncHandl
     from cards
     order by created_at desc`
   );
-  res.json(result.rows);
+  res.json(result.rows.map(serializeCardForList));
 }));
 
 app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
@@ -519,6 +1493,10 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
     return res.status(400).json({
       error: "provider, providerPaymentToken, last4, expMonth and expYear are required"
     });
+  }
+
+  if (!["clover", "paypal"].includes(provider)) {
+    return res.status(400).json({ error: "provider must be clover or paypal" });
   }
 
   const result = await query(
@@ -654,6 +1632,8 @@ app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermiss
     return res.status(400).json({ error: "Unsupported verificationStatus" });
   }
 
+  await ensureCardExists(req.params.cardId);
+
   await query(
     `update cards
     set
@@ -727,6 +1707,8 @@ app.post("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res)
     return res.status(400).json({ error: "provider must be clover or paypal" });
   }
 
+  await ensureCardExists(req.params.cardId);
+
   const storedRawResponse = serializeRawResponse(rawResponse);
   const result = await query(
     `insert into verification_attempts (
@@ -769,7 +1751,9 @@ app.post("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res)
   res.status(201).json(response);
 }));
 
-app.get("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) => {
+app.get("/api/cards/:cardId/checks", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  await ensureCardExists(req.params.cardId);
+
   const result = await query(
     `select
       id,
@@ -808,6 +1792,8 @@ app.get("/api/cards/:cardId/checks", requireAuth, asyncHandler(async (req, res) 
 }));
 
 app.get("/api/cards/:cardId/enrollment", requireAuth, requirePermission("canViewEnrollment"), asyncHandler(async (req, res) => {
+  await ensureCardExists(req.params.cardId);
+
   const result = await query(
     `select
       id,
@@ -859,6 +1845,8 @@ app.post("/api/cards/:cardId/enrollment", requireAuth, asyncHandler(async (req, 
   if (!enrollBankUrl) {
     return res.status(400).json({ error: "enrollBankUrl is required" });
   }
+
+  await ensureCardExists(req.params.cardId);
 
   const existing = await query(
     "select id from enrollment_profiles where card_id = $1",
@@ -921,7 +1909,19 @@ app.use("/api/numbers", requireAuth, numberRoutes);
 app.use("/api/calls", requireAuth, callRoutes);
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
+  console.error(toSafeErrorLog(error));
+  if (error.statusCode && error.statusCode < 500) {
+    return res.status(error.statusCode).json({ error: error.message });
+  }
+
+  if (isAxiosError(error)) {
+    return res.status(502).json({
+      error: "External provider request failed",
+      providerStatus: error.response?.status || null,
+      providerMessage: getProviderMessage(error)
+    });
+  }
+
   res.status(500).json({ error: "Internal server error" });
 });
 

@@ -16,7 +16,27 @@ function getPublicProviderConfig() {
     },
     paypal: {
       baseUrl: env.providers.paypal.baseUrl,
-      clientId: env.providers.paypal.clientId
+      restConfigured: Boolean(
+        env.providers.paypal.clientId &&
+        env.providers.paypal.clientSecret
+      ),
+      nvp: {
+        baseUrl: env.providers.paypal.nvp.baseUrl,
+        configured: Boolean(
+          env.providers.paypal.nvp.username &&
+          env.providers.paypal.nvp.password &&
+          env.providers.paypal.nvp.signature
+        )
+      },
+      manager: {
+        baseUrl: env.providers.paypal.manager.baseUrl,
+        configured: Boolean(
+          env.providers.paypal.manager.partner &&
+          env.providers.paypal.manager.vendor &&
+          env.providers.paypal.manager.user &&
+          env.providers.paypal.manager.password
+        )
+      }
     }
   };
 }

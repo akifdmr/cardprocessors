@@ -3,6 +3,7 @@ const { query } = require("./db");
 const env = require("./config/env");
 
 const SESSION_TTL_DAYS = 7;
+const SESSION_COOKIE_NAME = "clover_panel_session";
 const ROLE_PERMISSIONS = {
   admin: {
     canManageUsers: true,
@@ -207,8 +208,26 @@ function extractBearerToken(headerValue) {
   return headerValue.slice(7).trim();
 }
 
+function extractCookieToken(headerValue) {
+  if (!headerValue) {
+    return null;
+  }
+
+  const cookies = String(headerValue).split(";").map((part) => part.trim());
+  const sessionCookie = cookies.find((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!sessionCookie) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(sessionCookie.slice(SESSION_COOKIE_NAME.length + 1));
+  } catch {
+    return null;
+  }
+}
+
 async function requireAuth(req, res, next) {
-  const token = extractBearerToken(req.headers.authorization);
+  const token = extractBearerToken(req.headers.authorization) || extractCookieToken(req.headers.cookie);
   if (!token) {
     return res.status(401).json({ error: "Authentication required" });
   }
@@ -244,6 +263,7 @@ function requirePermission(permission) {
 
 module.exports = {
   ROLE_PERMISSIONS,
+  SESSION_COOKIE_NAME,
   authenticate,
   createSession,
   ensureBootstrapAdmin,

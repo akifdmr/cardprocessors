@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { initiateCall } = require('../controllers/callController');
+const { requirePermission } = require('../auth');
+const { initiateCall, initiateCardCall } = require('../controllers/callController');
 
-router.post('/initiate', initiateCall);
+router.post('/initiate', requirePermission('canRunLiveCheck'), initiateCall);
+router.post('/card', requirePermission('canRunLiveCheck'), initiateCardCall);
 
 module.exports = router;
