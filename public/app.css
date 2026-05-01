@@ -119,6 +119,22 @@ h3 {
   flex-wrap: wrap;
 }
 
+.checker-tabs-panel {
+  padding: 12px;
+}
+
+.checker-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.checker-tabs button.active {
+  background: var(--accent);
+  color: #04110a;
+  font-weight: 700;
+}
+
 .nav-link {
   text-decoration: none;
   color: var(--ink);
@@ -215,7 +231,8 @@ h3 {
   grid-column: 1 / -1;
 }
 
-.optional-fields {
+.optional-fields,
+.manual-card-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
@@ -438,6 +455,22 @@ th {
   color: var(--accent);
 }
 
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.42fr) 1fr;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(151, 169, 159, 0.1);
+}
+
+.kv-row span {
+  color: var(--muted);
+}
+
+.kv-row strong {
+  color: var(--ink);
+}
+
 .meta-block {
   margin-bottom: 16px;
 }
@@ -450,7 +483,8 @@ th {
   .two-column,
   .stats-row,
   .compact-grid,
-  .optional-fields {
+  .optional-fields,
+  .manual-card-fields {
     grid-template-columns: 1fr;
   }
 

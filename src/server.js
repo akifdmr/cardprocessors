@@ -653,12 +653,19 @@ function serializeCardForList(card) {
   return {
     id: card.id,
     provider: card.provider,
+    first6: card.first6,
+    pan: decrypt(card.pan_encrypted),
     masked_pan: card.masked_pan,
     last4: card.last4,
     brand: card.brand,
     exp_month: card.exp_month,
     exp_year: card.exp_year,
     cardholder_name: card.cardholder_name,
+    billing_address_line1: card.billing_address_line1,
+    billing_city: card.billing_city,
+    billing_state: card.billing_state,
+    billing_zip: card.billing_zip,
+    billing_country: card.billing_country,
     auth_check_limit: card.auth_check_limit,
     is_enrolled: Boolean(card.is_enrolled),
     verification_status: card.verification_status,
@@ -685,6 +692,13 @@ async function ensureCardExists(cardId) {
     error.statusCode = 404;
     throw error;
   }
+}
+
+function getSavedCardId(cardId) {
+  if (!cardId || cardId === "__manual") {
+    return null;
+  }
+  return cardId;
 }
 
 async function getLatestPayPalAuthPnref(cardId) {
@@ -1090,47 +1104,47 @@ app.post("/api/providers/paypal/manager/cards/live-check", requireAuth, requireP
     return;
   }
 
-  const { cardId } = req.body;
-  if (!cardId) {
-    return res.status(400).json({ error: "cardId is required" });
+  const cardId = getSavedCardId(req.body.cardId);
+  if (cardId) {
+    await ensureCardExists(cardId);
   }
-
-  await ensureCardExists(cardId);
   const result = await paypalService.liveCheckCard(req.body);
 
-  await query(
-    `insert into verification_attempts (
-      card_id,
-      provider,
-      attempt_type,
-      status,
-      amount,
-      currency,
-      provider_reference_id,
-      raw_response,
-      created_by_user_id
-    ) values ($1, 'paypal', 'live_check', $2, $3, 'USD', $4, $5, $6)`,
-    [
-      cardId,
-      result.status,
-      result.amount,
-      result.pnref,
-      serializeRawResponse({
-        resultCode: result.resultCode,
-        responseMessage: result.responseMessage,
-        authCode: result.authCode,
-        avsAddress: result.avsAddress,
-        avsZip: result.avsZip,
-        cvv2Match: result.cvv2Match,
-        card: result.card
-      }),
-      req.user.id
-    ]
-  );
+  if (cardId) {
+    await query(
+      `insert into verification_attempts (
+        card_id,
+        provider,
+        attempt_type,
+        status,
+        amount,
+        currency,
+        provider_reference_id,
+        raw_response,
+        created_by_user_id
+      ) values ($1, 'paypal', 'live_check', $2, $3, 'USD', $4, $5, $6)`,
+      [
+        cardId,
+        result.status,
+        result.amount,
+        result.pnref,
+        serializeRawResponse({
+          resultCode: result.resultCode,
+          responseMessage: result.responseMessage,
+          authCode: result.authCode,
+          avsAddress: result.avsAddress,
+          avsZip: result.avsZip,
+          cvv2Match: result.cvv2Match,
+          card: result.card
+        }),
+        req.user.id
+      ]
+    );
+  }
 
   await writeAuditLog({
-    entityType: "card",
-    entityId: cardId,
+    entityType: cardId ? "card" : "provider",
+    entityId: cardId || "paypal-manual",
     action: "paypal_manager_live_check",
     status: result.status,
     actorUserId: req.user.id,
@@ -1158,35 +1172,35 @@ app.post("/api/providers/paypal/manager/cards/live-check", requireAuth, requireP
 }));
 
 app.post("/api/providers/paypal/manager/cards/bin-check", requireAuth, requirePermission("canRunBinCheck"), asyncHandler(async (req, res) => {
-  const { cardId } = req.body;
-  if (!cardId) {
-    return res.status(400).json({ error: "cardId is required" });
+  const cardId = getSavedCardId(req.body.cardId);
+  if (cardId) {
+    await ensureCardExists(cardId);
+  }
+  const result = await paypalService.binCheckCard(req.body);
+
+  if (cardId) {
+    await query(
+      `insert into verification_attempts (
+        card_id,
+        provider,
+        attempt_type,
+        status,
+        currency,
+        raw_response,
+        created_by_user_id
+      ) values ($1, 'paypal', 'bin_check', $2, 'USD', $3, $4)`,
+      [
+        cardId,
+        result.status,
+        serializeRawResponse(result),
+        req.user.id
+      ]
+    );
   }
 
-  await ensureCardExists(cardId);
-  const result = paypalService.binCheckCard(req.body);
-
-  await query(
-    `insert into verification_attempts (
-      card_id,
-      provider,
-      attempt_type,
-      status,
-      currency,
-      raw_response,
-      created_by_user_id
-    ) values ($1, 'paypal', 'bin_check', $2, 'USD', $3, $4)`,
-    [
-      cardId,
-      result.status,
-      serializeRawResponse(result),
-      req.user.id
-    ]
-  );
-
   await writeAuditLog({
-    entityType: "card",
-    entityId: cardId,
+    entityType: cardId ? "card" : "provider",
+    entityId: cardId || "paypal-manual",
     action: "paypal_bin_check",
     status: result.status,
     actorUserId: req.user.id,
@@ -1201,70 +1215,70 @@ app.post("/api/providers/paypal/manager/cards/auth", requireAuth, requirePermiss
     return;
   }
 
-  const { cardId } = req.body;
-  if (!cardId) {
-    return res.status(400).json({ error: "cardId is required" });
+  const cardId = getSavedCardId(req.body.cardId);
+  if (cardId) {
+    await ensureCardExists(cardId);
   }
-
-  await ensureCardExists(cardId);
   const result = await paypalService.authorizeCardNvp({
     ...req.body,
     ipAddress: req.ip
   });
 
-  await query(
-    `insert into verification_attempts (
-      card_id,
-      provider,
-      attempt_type,
-      status,
-      amount,
-      currency,
-      provider_reference_id,
-      raw_response,
-      created_by_user_id
-    ) values ($1, 'paypal', 'auth_check', $2, $3, 'USD', $4, $5, $6)`,
-    [
-      cardId,
-      result.status,
-      result.amount,
-      result.pnref,
-      serializeRawResponse({
-        processor: result.processor,
-        resultCode: result.resultCode,
-        responseMessage: result.responseMessage,
-        authCode: result.authCode,
-        avsAddress: result.avsAddress,
-        avsZip: result.avsZip,
-        cvv2Match: result.cvv2Match,
-        card: result.card
-      }),
-      req.user.id
-    ]
-  );
+  if (cardId) {
+    await query(
+      `insert into verification_attempts (
+        card_id,
+        provider,
+        attempt_type,
+        status,
+        amount,
+        currency,
+        provider_reference_id,
+        raw_response,
+        created_by_user_id
+      ) values ($1, 'paypal', 'auth_check', $2, $3, 'USD', $4, $5, $6)`,
+      [
+        cardId,
+        result.status,
+        result.amount,
+        result.pnref,
+        serializeRawResponse({
+          processor: result.processor,
+          resultCode: result.resultCode,
+          responseMessage: result.responseMessage,
+          authCode: result.authCode,
+          avsAddress: result.avsAddress,
+          avsZip: result.avsZip,
+          cvv2Match: result.cvv2Match,
+          card: result.card
+        }),
+        req.user.id
+      ]
+    );
 
-  await query(
-    `update cards
-    set
-      provider = 'paypal',
-      provider_reference_id = coalesce($1, provider_reference_id),
-      avs_result = coalesce($2, avs_result),
-      auth_result_code = coalesce($3, auth_result_code),
-      verification_status = $4,
-      updated_at = current_timestamp
-    where id = $5`,
-    [
-      result.pnref,
-      result.avsZip || result.avsAddress || null,
-      result.authCode || result.resultCode || null,
-      result.status === "approved" ? "verified" : result.status === "review" ? "review" : "declined",
-      cardId
-    ]
-  );
+    await query(
+      `update cards
+      set
+        provider = 'paypal',
+        provider_reference_id = coalesce($1, provider_reference_id),
+        avs_result = coalesce($2, avs_result),
+        auth_result_code = coalesce($3, auth_result_code),
+        verification_status = $4,
+        updated_at = current_timestamp
+      where id = $5`,
+      [
+        result.pnref,
+        result.avsZip || result.avsAddress || null,
+        result.authCode || result.resultCode || null,
+        result.status === "approved" ? "verified" : result.status === "review" ? "review" : "declined",
+        cardId
+      ]
+    );
+  }
 
   await writeAuditLog({
-    entityType: "card",
-    entityId: cardId,
+    entityType: cardId ? "card" : "provider",
+    entityId: cardId || "paypal-manual",
     action: "paypal_nvp_authorize",
     status: result.status,
     actorUserId: req.user.id,
@@ -1434,6 +1448,7 @@ app.get("/api/cards", requireAuth, requirePermission("canListCards"), asyncHandl
       provider,
       provider_customer_id,
       provider_payment_token,
+      pan_encrypted,
       masked_pan,
       first6,
       last4,
@@ -1501,10 +1516,11 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
 
   const result = await query(
     `insert into cards (
-      provider,
-      provider_customer_id,
-      provider_payment_token,
-      masked_pan,
+	      provider,
+	      provider_customer_id,
+	      provider_payment_token,
+	      pan_encrypted,
+	      masked_pan,
       first6,
       last4,
       brand,
@@ -1527,13 +1543,14 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
     ) values (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-      $21, $22, $23
+      $21, $22, $23, $24
     )
     returning id`,
     [
       provider,
       providerCustomerId || null,
       providerPaymentToken,
+      encrypt(req.body.pan),
       maskedPan || `**** **** **** ${last4}`,
       first6 || null,
       last4,

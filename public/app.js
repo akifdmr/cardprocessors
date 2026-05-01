@@ -56,6 +56,7 @@ const elements = {
   paypalRestTestForm: document.getElementById("paypalRestTestForm"),
   paypalRestTestResult: document.getElementById("paypalRestTestResult"),
   paypalManagerTestForm: document.getElementById("paypalManagerTestForm"),
+  paypalNvpTestButton: document.getElementById("paypalNvpTestButton"),
   paypalManagerStatusResult: document.getElementById("paypalManagerStatusResult"),
   paypalManagerInquiryForm: document.getElementById("paypalManagerInquiryForm"),
   paypalManagerInquiryResult: document.getElementById("paypalManagerInquiryResult"),
@@ -79,10 +80,13 @@ const elements = {
   modalBody: document.getElementById("modalBody"),
   modalClose: document.getElementById("modalClose"),
   pageSections: document.querySelectorAll("[data-page]"),
-  routeLinks: document.querySelectorAll("[data-route-link]")
+  routeLinks: document.querySelectorAll("[data-route-link]"),
+  checkerTabs: document.querySelectorAll("[data-checker-tab]"),
+  checkerPanels: document.querySelectorAll("[data-checker-panel]")
 };
 
 const API_PREFIX = "/api";
+const MANUAL_CARD_VALUE = "__manual";
 
 function setView(loggedIn) {
   elements.loginView.hidden = loggedIn;
@@ -243,6 +247,20 @@ function renderRoute() {
   elements.routeLinks.forEach((link) => {
     link.classList.toggle("active", link.dataset.routeLink === activeRoute);
   });
+
+  if (activeRoute === "checkers") {
+    showCheckerTab(document.querySelector("[data-checker-tab].active")?.dataset.checkerTab || "cards");
+  }
+}
+
+function showCheckerTab(activeTab) {
+  elements.checkerTabs.forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.checkerTab === activeTab);
+  });
+
+  elements.checkerPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.checkerPanel !== activeTab;
+  });
 }
 
 function showCardsRoute() {
@@ -318,8 +336,27 @@ function renderCardOptions() {
   }
 
   elements.cardOptions.innerHTML = state.cards.map((card) => `
-    <option value="${escapeHtml(card.id)}">${escapeHtml(card.masked_pan || card.id)} · ${escapeHtml(card.cardholder_name || "-")}</option>
+    <option value="${escapeHtml(card.id)}">${escapeHtml(formatCardDisplayNumber(card))} · ${escapeHtml(card.cardholder_name || "-")}</option>
   `).join("");
+
+  document.querySelectorAll("[data-card-select]").forEach((select) => {
+    const selected = select.value || MANUAL_CARD_VALUE;
+    select.innerHTML = `
+      <option value="${MANUAL_CARD_VALUE}">Manual Card</option>
+      ${state.cards.map((card) => `
+        <option value="${escapeHtml(card.id)}">${escapeHtml(formatCardDisplayNumber(card))} · ${escapeHtml(card.cardholder_name || "-")}</option>
+      `).join("")}
+    `;
+    select.value = state.cards.some((card) => card.id === selected) ? selected : MANUAL_CARD_VALUE;
+    syncCardSelect(select);
+  });
+}
+
+function formatCardDisplayNumber(card) {
+  if (card.first6 && card.last4) {
+    return `${card.first6}******${card.last4}`;
+  }
+  return card.masked_pan || card.id;
 }
 
 function openModal({ eyebrow = "History", title = "Card History", body = "" }) {
@@ -357,7 +394,7 @@ function renderCards() {
     const safeCardId = escapeHtml(card.id);
 
     row.innerHTML = `
-      <td>${escapeHtml(card.masked_pan || "-")}</td>
+      <td>${escapeHtml(formatCardDisplayNumber(card))}</td>
       <td>${escapeHtml(balanceCheck?.balance_amount ?? balanceCheck?.amount ?? "-")}</td>
       <td>${escapeHtml(card.cardholder_name || "-")}</td>
       <td>
@@ -475,13 +512,104 @@ function renderSelectedCard() {
 
   elements.selectedCardPanel.hidden = false;
   elements.cardWorkspace.classList.toggle("single-column", elements.cardCreatePanel.hidden);
-  elements.selectedCardTitle.textContent = card.masked_pan || card.id;
+  elements.selectedCardTitle.textContent = formatCardDisplayNumber(card);
   elements.selectedCardMeta.textContent = `${card.cardholder_name || "Unknown holder"} · ${card.brand || "Unknown brand"} · ${card.verification_status || "pending"}`;
 
   const showCheckForm = can("canRunLiveCheck") || can("canRunBinCheck") || can("canRunBalanceCheck") || can("canRunAuthCheck");
   elements.checkForm.hidden = !showCheckForm;
   elements.enrollmentForm.hidden = !(can("canCreateEnrollment") && !card.is_enrolled);
+  fillCardDrivenForms(card);
   renderChecks();
+}
+
+function setFormValue(form, name, value) {
+  if (form?.elements?.[name] && value != null && value !== "") {
+    form.elements[name].value = value;
+  }
+}
+
+function getCardById(cardId) {
+  return state.cards.find((card) => card.id === cardId) || null;
+}
+
+function isManualCardValue(value) {
+  return !value || value === MANUAL_CARD_VALUE;
+}
+
+function syncCardSelect(select) {
+  const manualFields = document.getElementById(select.dataset.manualTarget || "");
+  const card = getCardById(select.value);
+  if (manualFields) {
+    manualFields.hidden = Boolean(card);
+  }
+  if (card) {
+    fillCardDrivenForms(card);
+  }
+}
+
+function applySelectedCardPayload(form, payload, { includeBilling = true } = {}) {
+  const card = getCardById(payload.cardId);
+  if (!card) {
+    delete payload.cardId;
+    return payload;
+  }
+
+  payload.pan = card.pan;
+  payload.expMonth = card.exp_month;
+  payload.expYear = card.exp_year;
+  payload.cardholderName = card.cardholder_name;
+  payload.first6 = card.first6;
+  payload.last4 = card.last4;
+
+  if (includeBilling) {
+    payload.billingAddressLine1 = card.billing_address_line1;
+    payload.billingCity = card.billing_city;
+    payload.billingState = card.billing_state;
+    payload.billingZip = card.billing_zip;
+    payload.billingCountry = card.billing_country || payload.billingCountry;
+  }
+
+  const nameParts = String(card.cardholder_name || "").trim().split(/\s+/).filter(Boolean);
+  payload.firstName = payload.firstName || nameParts[0];
+  payload.lastName = payload.lastName || nameParts.slice(1).join(" ");
+  return removeEmptyFields(payload);
+}
+
+function fillCardDrivenForms(card) {
+  const forms = [
+    elements.providerVerificationForm,
+    elements.paypalBinCheckForm,
+    elements.paypalLiveCheckForm,
+    elements.paypalAuthForm,
+    elements.paypalCaptureForm
+  ];
+
+  forms.forEach((form) => {
+    setFormValue(form, "cardId", card.id);
+    const select = form?.elements?.cardId;
+    const manualFields = document.getElementById(select?.dataset?.manualTarget || "");
+    if (manualFields) {
+      manualFields.hidden = true;
+    }
+  });
+  setFormValue(elements.paypalBinCheckForm, "bin", card.first6);
+  setFormValue(elements.paypalLiveCheckForm, "pan", card.pan);
+  setFormValue(elements.paypalAuthForm, "pan", card.pan);
+
+  [elements.paypalLiveCheckForm, elements.paypalAuthForm].forEach((form) => {
+    setFormValue(form, "expMonth", card.exp_month);
+    setFormValue(form, "expYear", card.exp_year);
+    setFormValue(form, "cardholderName", card.cardholder_name);
+  });
+
+  const nameParts = String(card.cardholder_name || "").trim().split(/\s+/).filter(Boolean);
+  setFormValue(elements.paypalAuthForm, "firstName", nameParts[0]);
+  setFormValue(elements.paypalAuthForm, "lastName", nameParts.slice(1).join(" "));
+  setFormValue(elements.paypalAuthForm, "street", card.billing_address_line1);
+  setFormValue(elements.paypalAuthForm, "city", card.billing_city);
+  setFormValue(elements.paypalAuthForm, "state", card.billing_state);
+  setFormValue(elements.paypalAuthForm, "billingZip", card.billing_zip);
+  setFormValue(elements.paypalAuthForm, "billingCountry", card.billing_country);
 }
 
 function renderUsers() {
@@ -592,6 +720,22 @@ function renderGenericProviderResult(target, title, payload) {
     <article class="list-card">
       <strong>${escapeHtml(title)}</strong>
       <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    </article>
+  `;
+}
+
+function renderBinCheckResult(result) {
+  const details = result?.details || {};
+  elements.paypalBinCheckResult.innerHTML = `
+    <article class="list-card bin-result">
+      <strong>BIN/IIN Result</strong>
+      ${Object.entries(details).map(([label, value]) => `
+        <div class="kv-row">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value || "-")}</strong>
+        </div>
+      `).join("")}
+      <pre>${escapeHtml(JSON.stringify({ status: result.status, source: result.source }, null, 2))}</pre>
     </article>
   `;
 }
@@ -780,6 +924,17 @@ elements.addressFieldsToggle?.addEventListener("click", () => {
   elements.addressFields.hidden = !elements.addressFields.hidden;
 });
 
+elements.checkerTabs.forEach((tab) => {
+  tab.addEventListener("click", () => showCheckerTab(tab.dataset.checkerTab));
+});
+
+document.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-card-select]");
+  if (select) {
+    syncCardSelect(select);
+  }
+});
+
 elements.modalClose?.addEventListener("click", closeModal);
 elements.modalOverlay?.addEventListener("click", (event) => {
   if (event.target === elements.modalOverlay) {
@@ -792,7 +947,7 @@ elements.cardForm.addEventListener("submit", async (event) => {
 
   const payload = removeEmptyFields(formToObject(elements.cardForm));
   const pan = String(payload.pan || "").replace(/\D/g, "");
-  delete payload.pan;
+  payload.pan = pan;
   delete payload.cvv2;
 
   if (pan.length < 12) {
@@ -801,7 +956,9 @@ elements.cardForm.addEventListener("submit", async (event) => {
   }
 
   payload.provider = "paypal";
+  payload.first6 = pan.slice(0, 6);
   payload.last4 = pan.slice(-4);
+  payload.maskedPan = `${payload.first6}******${payload.last4}`;
   payload.providerPaymentToken = `manual_${Date.now()}_${payload.last4}`;
 
   try {
@@ -975,6 +1132,16 @@ elements.paypalManagerTestForm?.addEventListener("submit", async (event) => {
   }
 });
 
+elements.paypalNvpTestButton?.addEventListener("click", async () => {
+  try {
+    const result = await api("/providers/paypal/nvp/test", { method: "POST" });
+    renderGenericProviderResult(elements.paypalManagerStatusResult, "PayPal NVP Account", result);
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.paypalManagerStatusResult, "PayPal NVP Error", { error: error.message });
+  }
+});
+
 elements.paypalManagerInquiryForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = formToObject(elements.paypalManagerInquiryForm);
@@ -993,15 +1160,24 @@ elements.paypalManagerInquiryForm?.addEventListener("submit", async (event) => {
 
 elements.paypalBinCheckForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = formToObject(elements.paypalBinCheckForm);
+  const payload = applySelectedCardPayload(
+    elements.paypalBinCheckForm,
+    removeEmptyFields(formToObject(elements.paypalBinCheckForm)),
+    { includeBilling: false }
+  );
+  if (!payload.bin && payload.first6) {
+    payload.bin = payload.first6;
+  }
 
   try {
     const result = await api("/providers/paypal/manager/cards/bin-check", {
       method: "POST",
       body: JSON.stringify(payload)
     });
-    renderGenericProviderResult(elements.paypalBinCheckResult, "PayPal BIN Check", result);
-    await refreshCardChecks(payload.cardId);
+    renderBinCheckResult(result);
+    if (payload.cardId) {
+      await refreshCardChecks(payload.cardId);
+    }
     await loadAuditLogs();
   } catch (error) {
     renderGenericProviderResult(elements.paypalBinCheckResult, "PayPal BIN Check Error", { error: error.message });
@@ -1010,7 +1186,10 @@ elements.paypalBinCheckForm?.addEventListener("submit", async (event) => {
 
 elements.paypalLiveCheckForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = formToObject(elements.paypalLiveCheckForm);
+  const payload = applySelectedCardPayload(
+    elements.paypalLiveCheckForm,
+    removeEmptyFields(formToObject(elements.paypalLiveCheckForm))
+  );
   payload.amount = Number(payload.amount || 0);
 
   try {
@@ -1019,7 +1198,9 @@ elements.paypalLiveCheckForm?.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload)
     });
     renderGenericProviderResult(elements.paypalLiveCheckResult, "PayPal Live Check", result);
-    await refreshCardChecks(payload.cardId);
+    if (payload.cardId) {
+      await refreshCardChecks(payload.cardId);
+    }
     await loadAuditLogs();
   } catch (error) {
     renderGenericProviderResult(elements.paypalLiveCheckResult, "PayPal Live Check Error", { error: error.message });
@@ -1028,8 +1209,12 @@ elements.paypalLiveCheckForm?.addEventListener("submit", async (event) => {
 
 elements.paypalAuthForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = formToObject(elements.paypalAuthForm);
+  const payload = applySelectedCardPayload(
+    elements.paypalAuthForm,
+    removeEmptyFields(formToObject(elements.paypalAuthForm))
+  );
   payload.amount = Number(payload.amount);
+  payload.paymentAction = "Authorization";
 
   try {
     const result = await api("/providers/paypal/manager/cards/auth", {
@@ -1038,7 +1223,9 @@ elements.paypalAuthForm?.addEventListener("submit", async (event) => {
     });
     renderGenericProviderResult(elements.paypalAuthResult, "PayPal Authorization", result);
     await loadCards();
-    await refreshCardChecks(payload.cardId);
+    if (payload.cardId) {
+      await refreshCardChecks(payload.cardId);
+    }
     await loadAuditLogs();
   } catch (error) {
     renderGenericProviderResult(elements.paypalAuthResult, "PayPal Authorization Error", { error: error.message });
@@ -1051,7 +1238,7 @@ elements.paypalCaptureForm?.addEventListener("submit", async (event) => {
   payload.amount = Number(payload.amount);
   payload.captureComplete = payload.captureComplete !== "false";
 
-  if (!payload.cardId) {
+  if (isManualCardValue(payload.cardId)) {
     delete payload.cardId;
   }
   if (!payload.authorizationPnref) {

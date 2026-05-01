@@ -172,6 +172,7 @@ async function query(text, params = []) {
       "provider",
       "provider_customer_id",
       "provider_payment_token",
+      "pan_encrypted",
       "masked_pan",
       "first6",
       "last4",

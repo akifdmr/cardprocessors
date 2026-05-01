@@ -277,7 +277,17 @@
             </div>
           </section>
 
-          <section class="two-column" data-page="checkers">
+          <section class="panel checker-tabs-panel" data-page="checkers">
+            <div class="checker-tabs" role="tablist">
+              <button type="button" class="ghost active" data-checker-tab="cards">Card Checks</button>
+              <button type="button" class="ghost" data-checker-tab="providers">Provider Status</button>
+              <button type="button" class="ghost" data-checker-tab="inquiry">Inquiry</button>
+              <button type="button" class="ghost" data-checker-tab="manual">Manual Record</button>
+              <button type="button" class="ghost" data-checker-tab="clover">Clover</button>
+            </div>
+          </section>
+
+          <section class="two-column" data-page="checkers" data-checker-panel="providers">
             <section class="panel">
               <div class="section-head">
                 <div>
@@ -353,7 +363,7 @@
             </section>
           </section>
 
-          <section class="panel" data-page="checkers">
+          <section class="panel" data-page="checkers" data-checker-panel="manual">
             <div class="section-head">
               <div>
                 <p class="eyebrow">Verification</p>
@@ -402,7 +412,7 @@
             <div id="providerVerificationResult" class="list-block"></div>
           </section>
 
-          <section class="two-column" data-page="checkers">
+          <section class="two-column" data-page="checkers" data-checker-panel="providers">
             <section class="panel">
               <div class="section-head">
                 <div>
@@ -425,12 +435,13 @@
               </div>
               <form id="paypalManagerTestForm" class="form-grid compact-grid">
                 <button type="submit" class="primary">Test Manager Credentials</button>
+                <button id="paypalNvpTestButton" type="button" class="ghost">Test NVP Account</button>
               </form>
               <div id="paypalManagerStatusResult" class="list-block"></div>
             </section>
           </section>
 
-          <section class="panel" data-page="checkers">
+          <section class="panel" data-page="checkers" data-checker-panel="inquiry">
             <div class="section-head">
               <div>
                 <p class="eyebrow">PayPal Manager</p>
@@ -459,7 +470,7 @@
             <div id="paypalManagerInquiryResult" class="list-block"></div>
           </section>
 
-          <section class="two-column" data-page="checkers">
+          <section class="two-column" data-page="checkers" data-checker-panel="cards">
             <section class="panel">
               <div class="section-head">
                 <div>
@@ -469,21 +480,15 @@
               </div>
               <form id="paypalBinCheckForm" class="form-grid compact-grid">
                 <label>
-                  <span>Card Id</span>
-                  <input name="cardId" list="cardOptions" placeholder="Select a card or paste id" required>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalBinManualFields"></select>
                 </label>
-                <label class="full-span">
-                  <span>Card Number</span>
-                  <input name="pan" autocomplete="off" required>
-                </label>
-                <label>
-                  <span>Exp Month</span>
-                  <input name="expMonth" maxlength="2" value="12">
-                </label>
-                <label>
-                  <span>Exp Year</span>
-                  <input name="expYear" maxlength="4" value="2030">
-                </label>
+                <div id="paypalBinManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>BIN/IIN</span>
+                    <input name="bin" maxlength="6" inputmode="numeric" required>
+                  </label>
+                </div>
                 <button type="submit" class="primary">Run BIN Check</button>
               </form>
               <div id="paypalBinCheckResult" class="list-block"></div>
@@ -498,37 +503,35 @@
               </div>
               <form id="paypalLiveCheckForm" class="form-grid compact-grid">
                 <label>
-                  <span>Card Id</span>
-                  <input name="cardId" list="cardOptions" placeholder="Select a card or paste id" required>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalLiveManualFields"></select>
                 </label>
                 <label>
                   <span>Amount</span>
                   <input name="amount" type="number" step="0.01" value="0.00">
                 </label>
-                <label class="full-span">
-                  <span>Card Number</span>
-                  <input name="pan" autocomplete="off" required>
-                </label>
-                <label>
-                  <span>Exp Month</span>
-                  <input name="expMonth" maxlength="2" required>
-                </label>
-                <label>
-                  <span>Exp Year</span>
-                  <input name="expYear" maxlength="4" required>
-                </label>
-                <label>
-                  <span>CVV2</span>
-                  <input name="cvv2" autocomplete="off">
-                </label>
-                <label>
-                  <span>Billing ZIP</span>
-                  <input name="billingZip">
-                </label>
-                <label class="full-span">
-                  <span>Cardholder Name</span>
-                  <input name="cardholderName">
-                </label>
+                <div id="paypalLiveManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <input name="pan" autocomplete="off">
+                  </label>
+                  <label>
+                    <span>Exp Month</span>
+                    <input name="expMonth" maxlength="2">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input name="expYear" maxlength="4">
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <input name="cvv2" autocomplete="off">
+                  </label>
+                  <label class="full-span">
+                    <span>Cardholder Name</span>
+                    <input name="cardholderName">
+                  </label>
+                </div>
                 <button type="submit" class="primary">Run Live Check</button>
               </form>
               <div id="paypalLiveCheckResult" class="list-block"></div>
@@ -544,36 +547,62 @@
             </div>
             <form id="paypalAuthForm" class="form-grid compact-grid">
               <label>
-                <span>Card Id</span>
-                <input name="cardId" list="cardOptions" placeholder="Select a card or paste id" required>
+                <span>Card</span>
+                <select name="cardId" data-card-select data-manual-target="paypalAuthManualFields"></select>
               </label>
               <label>
                 <span>Amount</span>
                 <input name="amount" type="number" step="0.01" required>
               </label>
-              <label class="full-span">
-                <span>Card Number</span>
-                <input name="pan" autocomplete="off" required>
-              </label>
+              <div id="paypalAuthManualFields" class="manual-card-fields full-span" hidden>
+                <label class="full-span">
+                  <span>Card Number</span>
+                  <input name="pan" autocomplete="off">
+                </label>
+                <label>
+                  <span>Exp Month</span>
+                  <input name="expMonth" maxlength="2">
+                </label>
+                <label>
+                  <span>Exp Year</span>
+                  <input name="expYear" maxlength="4">
+                </label>
+                <label>
+                  <span>CVV</span>
+                  <input name="cvv" autocomplete="off">
+                </label>
+                <label>
+                  <span>First Name</span>
+                  <input name="firstName">
+                </label>
+                <label>
+                  <span>Last Name</span>
+                  <input name="lastName">
+                </label>
+                <label>
+                  <span>Street</span>
+                  <input name="street">
+                </label>
+                <label>
+                  <span>City</span>
+                  <input name="city">
+                </label>
+                <label>
+                  <span>State</span>
+                  <input name="state">
+                </label>
+                <label>
+                  <span>ZIP</span>
+                  <input name="billingZip">
+                </label>
+                <label>
+                  <span>Country</span>
+                  <input name="billingCountry" value="US" maxlength="2">
+                </label>
+              </div>
               <label>
-                <span>Exp Month</span>
-                <input name="expMonth" maxlength="2" required>
-              </label>
-              <label>
-                <span>Exp Year</span>
-                <input name="expYear" maxlength="4" required>
-              </label>
-              <label>
-                <span>CVV2</span>
-                <input name="cvv2" autocomplete="off">
-              </label>
-              <label>
-                <span>Billing ZIP</span>
-                <input name="billingZip">
-              </label>
-              <label class="full-span">
-                <span>Cardholder Name</span>
-                <input name="cardholderName">
+                <span>Currency</span>
+                <input name="currency" value="USD" maxlength="3">
               </label>
               <button type="submit" class="primary">Authorize Card</button>
             </form>
@@ -589,13 +618,15 @@
             </div>
             <form id="paypalCaptureForm" class="form-grid compact-grid">
               <label>
-                <span>Card Id</span>
-                <input name="cardId" list="cardOptions" placeholder="Uses latest approved PayPal auth">
+                <span>Card</span>
+                <select name="cardId" data-card-select data-manual-target="paypalCaptureManualFields"></select>
               </label>
-              <label>
-                <span>Auth PNREF</span>
-                <input name="authorizationPnref" maxlength="12">
-              </label>
+              <div id="paypalCaptureManualFields" class="manual-card-fields full-span" hidden>
+                <label class="full-span">
+                  <span>Auth PNREF</span>
+                  <input name="authorizationPnref" maxlength="12">
+                </label>
+              </div>
               <label>
                 <span>Amount</span>
                 <input name="amount" type="number" step="0.01" required>
@@ -612,7 +643,7 @@
             <div id="paypalCaptureResult" class="list-block"></div>
           </section>
 
-          <section class="two-column" data-page="checkers">
+          <section class="two-column" data-page="checkers" data-checker-panel="clover">
             <section class="panel">
               <div class="section-head">
                 <div>
@@ -664,7 +695,7 @@
             </section>
           </section>
 
-          <section class="panel" data-page="checkers">
+          <section class="panel" data-page="checkers" data-checker-panel="clover">
             <div class="section-head">
               <div>
                 <p class="eyebrow">Clover Device</p>
