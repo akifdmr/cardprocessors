@@ -42,6 +42,8 @@ async function ensureMongoSchema() {
     db.collection("verification_attempts").createIndex({ card_id: 1, created_at: -1 }),
     db.collection("enrollment_profiles").createIndex({ card_id: 1 }, { unique: true }),
     db.collection("card_phone_numbers").createIndex({ card_id: 1, created_at: -1 }),
+    db.collection("unchargeback_cases").createIndex({ created_at: -1 }),
+    db.collection("unchargeback_cases").createIndex({ case_id: 1 }),
     db.collection("audit_logs").createIndex({ entity_type: 1, entity_id: 1, created_at: -1 })
   ]);
 }

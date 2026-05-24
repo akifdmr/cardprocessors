@@ -132,6 +132,60 @@ async function getNumbersByCard(cardId) {
   return result.rows.map(sanitizeRow);
 }
 
+async function getPrimaryNumberByCard(cardId) {
+  const result = await query(
+    `select
+      id,
+      card_id,
+      phone_number,
+      masked_number,
+      is_verified,
+      added_by,
+      created_at,
+      updated_at
+    from card_phone_numbers
+    where card_id = $1
+    order by is_verified desc, created_at desc
+    limit 1`,
+    [cardId]
+  );
+
+  return result.rows[0] ? sanitizeRow(result.rows[0]) : null;
+}
+
+async function getNumberById(numberId) {
+  const result = await query(
+    `select
+      id,
+      card_id,
+      phone_number,
+      masked_number,
+      is_verified,
+      added_by,
+      created_at,
+      updated_at
+    from card_phone_numbers
+    where id = $1`,
+    [numberId]
+  );
+
+  return result.rows[0] ? sanitizeRow(result.rows[0]) : null;
+}
+
+async function markNumberVerified(numberId) {
+  await query(
+    `update card_phone_numbers
+    set
+      is_verified = true,
+      verification_code = null,
+      updated_at = current_timestamp
+    where id = $1`,
+    [numberId]
+  );
+
+  return getNumberById(numberId);
+}
+
 async function listAllNumbers() {
   const result = await query(
     `select
@@ -166,6 +220,9 @@ function sanitizeRow(row) {
 module.exports = {
   addNumber,
   verifyNumber,
+  getNumberById,
   getNumbersByCard,
+  getPrimaryNumberByCard,
+  markNumberVerified,
   listAllNumbers
 };

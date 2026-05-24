@@ -42,15 +42,201 @@
         </header>
 
         <nav class="app-nav panel">
-          <a href="#/cards" data-route-link="cards" class="nav-link">Cards</a>
-          <a href="#/provision" data-route-link="provision" class="nav-link">Kart Provizyon</a>
-          <a href="#/charge" data-route-link="charge" class="nav-link">Kart Çekimi</a>
-          <a href="#/checkers" data-route-link="checkers" class="nav-link">Checkerlar</a>
-          <a href="#/users" data-route-link="users" class="nav-link">Users</a>
-          <a href="#/logs" data-route-link="logs" class="nav-link">Logs</a>
+          <a href="#/checkers" data-route-link="checkers" class="nav-link">Card Checkers</a>
+          <a href="#/card-payments" data-route-link="card-payments" class="nav-link">Card Payments</a>
+          <details class="nav-dropdown">
+            <summary class="nav-link">Payment Processors</summary>
+            <div class="nav-dropdown-menu">
+              <a href="#/payment-processors/propelrpay"><span class="processor-health-dot unknown" data-processor-health="propelrpay"></span>PropelrPay</a>
+              <a href="#/payment-processors/fluidpay"><span class="processor-health-dot unknown" data-processor-health="fluidpay"></span>FluidPay</a>
+              <a href="#/payment-processors/globalpayments"><span class="processor-health-dot unknown" data-processor-health="globalpayments"></span>Global Payments</a>
+              <a href="#/payment-processors/clover"><span class="processor-health-dot unknown" data-processor-health="clover"></span>Clover</a>
+              <a href="#/payment-processors/paypal"><span class="processor-health-dot unknown" data-processor-health="paypal"></span>PayPal</a>
+            </div>
+          </details>
+          <a href="#/cards" data-route-link="cards" class="nav-link">Card List</a>
+          <a href="#/providers" data-route-link="providers" class="nav-link">Providers</a>
+          <a href="#/burp-suite" data-route-link="burp-suite" class="nav-link">Burp Suite</a>
+          <a href="#/iwant-clips-profiles" data-route-link="iwant-clips-profiles" class="nav-link">Iwant Clips Profiles</a>
         </nav>
 
         <main class="dashboard">
+          <section class="burp-workspace" data-page="burp-suite" hidden>
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Traffic Control</p>
+                  <h3>Burp Suite</h3>
+                </div>
+                <div class="row-actions">
+                  <button id="burpRefreshButton" type="button" class="ghost small">Refresh</button>
+                  <button id="burpStopButton" type="button" class="danger small">Burp Kapat</button>
+                </div>
+              </div>
+              <form id="burpStartForm" class="form-grid burp-control-grid">
+                <label>
+                  <span>Domain Scope</span>
+                  <input name="scopeHosts" value="127.0.0.1" placeholder="127.0.0.1,staging.example.com" required>
+                </label>
+                <label>
+                  <span>Burp Proxy</span>
+                  <input name="proxyUrl" value="http://127.0.0.1:8080" required>
+                </label>
+                <label>
+                  <span>Hold Seconds</span>
+                  <input name="holdSeconds" type="number" min="5" max="120" value="60">
+                </label>
+                <label class="inline-checkbox">
+                  <input name="allowInsecureTls" type="checkbox">
+                  <span>Insecure TLS</span>
+                </label>
+                <label class="inline-checkbox">
+                  <input name="proxyEnabled" type="checkbox" checked>
+                  <span>Proxy Active</span>
+                </label>
+                <button type="submit" class="primary">Burp Başlat</button>
+              </form>
+              <div id="burpStatus" class="list-block burp-status"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">OTP Capture</p>
+                  <h3>Yakalama</h3>
+                </div>
+              </div>
+              <form id="burpArmOtpForm" class="form-grid burp-control-grid">
+                <label>
+                  <span>Path Keyword</span>
+                  <input name="pathKeyword" value="otp" required>
+                </label>
+                <label>
+                  <span>Hold Seconds</span>
+                  <input name="holdSeconds" type="number" min="5" max="120" value="60">
+                </label>
+                <button type="submit" class="primary">OTP Yakala</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Local API</p>
+                  <h3>OTP Gönder</h3>
+                </div>
+              </div>
+              <form id="burpOtpSendForm" class="form-grid burp-otp-send-grid">
+                <label>
+                  <span>Recipient</span>
+                  <input name="recipient" value="+15550001000" required>
+                </label>
+                <label>
+                  <span>Channel</span>
+                  <select name="channel">
+                    <option value="sms">SMS</option>
+                    <option value="email">Email</option>
+                    <option value="push">Push</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Purpose</span>
+                  <input name="purpose" value="local-burp-test" required>
+                </label>
+                <label>
+                  <span>Target URL</span>
+                  <input name="targetUrl" placeholder="default: local OTP inbox">
+                </label>
+                <label>
+                  <span>Code Length</span>
+                  <input name="codeLength" type="number" min="4" max="10" value="6">
+                </label>
+                <label class="inline-checkbox">
+                  <input name="armCapture" type="checkbox" checked>
+                  <span>Arm Capture</span>
+                </label>
+                <button type="submit" class="primary">OTP Gönder</button>
+              </form>
+              <div id="burpOtpSendResult" class="list-block burp-otp-result"></div>
+            </section>
+
+            <section class="burp-columns">
+              <section class="panel">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Live Flow</p>
+                    <h3>Traffic</h3>
+                  </div>
+                </div>
+                <div id="burpTrafficList" class="list-block burp-traffic-list"></div>
+              </section>
+
+              <section class="panel">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Pending</p>
+                    <h3>Response Editor</h3>
+                  </div>
+                </div>
+                <div id="burpPendingList" class="list-block"></div>
+                <form id="burpReleaseForm" class="form-grid burp-response-editor" hidden>
+                  <input name="pendingId" type="hidden">
+                  <label>
+                    <span>Status</span>
+                    <input name="status" type="number" min="100" max="599" required>
+                  </label>
+                  <label class="full-span">
+                    <span>Headers JSON</span>
+                    <textarea name="headers" rows="5"></textarea>
+                  </label>
+                  <label class="full-span">
+                    <span>Body JSON</span>
+                    <textarea name="body" rows="14" required></textarea>
+                  </label>
+                  <button type="submit" class="primary">Response Gönder</button>
+                </form>
+              </section>
+            </section>
+          </section>
+
+          <section class="two-column" data-page="checkers" data-checker-panel="learning" hidden>
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Clover</p>
+                  <h3>Machine Learning</h3>
+                </div>
+                <button id="cloverLearningRefreshButton" type="button" class="ghost small">Refresh</button>
+              </div>
+              <form id="cloverLearningForm" class="form-grid compact-grid">
+                <label>
+                  <span>BIN</span>
+                  <input name="bin" maxlength="12" inputmode="numeric" autocomplete="off" placeholder="400000">
+                </label>
+                <label>
+                  <span>Quantity</span>
+                  <input name="quantity" type="number" min="1" max="100" value="10">
+                </label>
+                <label>
+                  <span>Max Attempts</span>
+                  <input name="maxAttempts" type="number" min="1" max="200" value="30">
+                </label>
+                <button type="submit" class="primary">Run</button>
+              </form>
+              <div id="cloverLearningStatus" class="list-block"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Result</p>
+                  <h3>Run Output</h3>
+                </div>
+              </div>
+              <div id="cloverLearningResult" class="list-block"></div>
+            </section>
+          </section>
+
           <section class="panel stats-row" data-page="cards">
             <div>
               <p class="metric-label">Cards</p>
@@ -66,7 +252,7 @@
             </div>
           </section>
 
-          <section id="adminUsersPanel" class="panel" data-page="users" hidden>
+          <section id="adminUsersPanel" class="panel" data-page="legacy-admin" hidden>
             <div class="section-head">
               <div>
                 <p class="eyebrow">Admin</p>
@@ -193,6 +379,7 @@
                   <select name="provider">
                     <option value="clover">clover</option>
                     <option value="paypal">paypal</option>
+                    <option value="fluidpay">fluidpay</option>
                   </select>
                 </label>
                 <label>
@@ -280,6 +467,7 @@
           <section class="panel checker-tabs-panel" data-page="checkers">
             <div class="checker-tabs" role="tablist">
               <button type="button" class="ghost active" data-checker-tab="cards">Card Checks</button>
+              <button type="button" class="ghost" data-checker-tab="learning">Machine Learning</button>
               <button type="button" class="ghost" data-checker-tab="providers">Provider Status</button>
               <button type="button" class="ghost" data-checker-tab="inquiry">Inquiry</button>
               <button type="button" class="ghost" data-checker-tab="manual">Manual Record</button>
@@ -380,6 +568,7 @@
                 <select name="provider">
                   <option value="clover">clover</option>
                   <option value="paypal">paypal</option>
+                  <option value="fluidpay">fluidpay</option>
                 </select>
               </label>
               <label>
@@ -474,7 +663,63 @@
             <section class="panel">
               <div class="section-head">
                 <div>
-                  <p class="eyebrow">PayPal Manager</p>
+                  <p class="eyebrow">Clover + RapidAPI</p>
+                  <h3>Verify & BIN Check</h3>
+                </div>
+              </div>
+              <form id="cloverVerifyForm" class="form-grid compact-grid">
+                <label>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="cloverVerifyManualFields" data-summary-target="cloverVerifyCardSummary"></select>
+                </label>
+                <label>
+                  <span>IP</span>
+                  <input name="ip">
+                </label>
+                <div id="cloverVerifyCardSummary" class="card-summary full-span"></div>
+                <label class="full-span">
+                  <span>Clover Source Token</span>
+                  <input name="source" autocomplete="off" required>
+                </label>
+                <label>
+                  <span>Amount (cents)</span>
+                  <input name="amount" type="number" step="1" value="1">
+                </label>
+                <label>
+                  <span>Currency</span>
+                  <input name="currency" value="usd" maxlength="3">
+                </label>
+                <div id="cloverVerifyManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <input name="pan" autocomplete="off" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>BIN/IIN</span>
+                    <input name="bin" maxlength="6" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Month</span>
+                    <input name="expMonth" maxlength="2" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input name="expYear" maxlength="4" inputmode="numeric">
+                  </label>
+                  <label class="full-span">
+                    <span>Cardholder Name</span>
+                    <input name="cardholderName">
+                  </label>
+                </div>
+                <button type="submit" class="primary">Token Verify + BIN Check</button>
+              </form>
+              <div id="cloverVerifyResult" class="list-block"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">RapidAPI</p>
                   <h3>BIN Check</h3>
                 </div>
               </div>
@@ -482,6 +727,10 @@
                 <label>
                   <span>Card</span>
                   <select name="cardId" data-card-select data-manual-target="paypalBinManualFields"></select>
+                </label>
+                <label>
+                  <span>IP</span>
+                  <input name="ip">
                 </label>
                 <div id="paypalBinManualFields" class="manual-card-fields full-span" hidden>
                   <label class="full-span">
@@ -538,109 +787,403 @@
             </section>
           </section>
 
-          <section class="panel" data-page="provision">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">PayPal NVP/SOAP</p>
-                <h3>Authorization</h3>
+          <section class="two-column" data-page="legacy-card-payments">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">PayPal DirectPayment</p>
+                  <h3>Sale</h3>
+                </div>
               </div>
-            </div>
-            <form id="paypalAuthForm" class="form-grid compact-grid">
-              <label>
-                <span>Card</span>
-                <select name="cardId" data-card-select data-manual-target="paypalAuthManualFields"></select>
-              </label>
-              <label>
-                <span>Amount</span>
-                <input name="amount" type="number" step="0.01" required>
-              </label>
-              <div id="paypalAuthManualFields" class="manual-card-fields full-span" hidden>
-                <label class="full-span">
-                  <span>Card Number</span>
-                  <input name="pan" autocomplete="off">
+              <form id="paypalSaleForm" class="form-grid compact-grid">
+                <label>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalSaleManualFields" data-summary-target="paypalSaleCardSummary"></select>
                 </label>
                 <label>
-                  <span>Exp Month</span>
-                  <input name="expMonth" maxlength="2">
+                  <span>Amount</span>
+                  <input name="amount" type="number" step="0.01" required>
                 </label>
+                <div id="paypalSaleCardSummary" class="card-summary full-span"></div>
+                <div id="paypalSaleManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <input name="pan" autocomplete="off" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Month</span>
+                    <input name="expMonth" maxlength="2" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input name="expYear" maxlength="4" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <input name="cvv" autocomplete="off" inputmode="numeric" maxlength="4">
+                  </label>
+                  <label>
+                    <span>First Name</span>
+                    <input name="firstName">
+                  </label>
+                  <label>
+                    <span>Last Name</span>
+                    <input name="lastName">
+                  </label>
+                  <label>
+                    <span>Street</span>
+                    <input name="street">
+                  </label>
+                  <label>
+                    <span>City</span>
+                    <input name="city">
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <input name="state">
+                  </label>
+                  <label>
+                    <span>ZIP</span>
+                    <input name="billingZip">
+                  </label>
+                  <label>
+                    <span>Country</span>
+                    <input name="billingCountry" value="US" maxlength="2">
+                  </label>
+                </div>
                 <label>
-                  <span>Exp Year</span>
-                  <input name="expYear" maxlength="4">
+                  <span>Currency</span>
+                  <input name="currency" value="USD" maxlength="3">
                 </label>
-                <label>
-                  <span>CVV</span>
-                  <input name="cvv" autocomplete="off">
-                </label>
-                <label>
-                  <span>First Name</span>
-                  <input name="firstName">
-                </label>
-                <label>
-                  <span>Last Name</span>
-                  <input name="lastName">
-                </label>
-                <label>
-                  <span>Street</span>
-                  <input name="street">
-                </label>
-                <label>
-                  <span>City</span>
-                  <input name="city">
-                </label>
-                <label>
-                  <span>State</span>
-                  <input name="state">
-                </label>
-                <label>
-                  <span>ZIP</span>
-                  <input name="billingZip">
-                </label>
-                <label>
-                  <span>Country</span>
-                  <input name="billingCountry" value="US" maxlength="2">
-                </label>
+                <button type="submit" class="primary">Run Sale</button>
+              </form>
+              <div id="paypalSaleResult" class="list-block"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">PayPal DirectPayment</p>
+                  <h3>Authorization</h3>
+                </div>
               </div>
-              <label>
-                <span>Currency</span>
-                <input name="currency" value="USD" maxlength="3">
-              </label>
-              <button type="submit" class="primary">Authorize Card</button>
-            </form>
-            <div id="paypalAuthResult" class="list-block"></div>
+              <form id="paypalAuthForm" class="form-grid compact-grid">
+                <label>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalAuthManualFields" data-summary-target="paypalAuthCardSummary"></select>
+                </label>
+                <label>
+                  <span>Amount</span>
+                  <input name="amount" type="number" step="0.01" required>
+                </label>
+                <div id="paypalAuthCardSummary" class="card-summary full-span"></div>
+                <div id="paypalAuthManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <input name="pan" autocomplete="off" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Month</span>
+                    <input name="expMonth" maxlength="2" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input name="expYear" maxlength="4" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <input name="cvv" autocomplete="off" inputmode="numeric" maxlength="4">
+                  </label>
+                  <label>
+                    <span>First Name</span>
+                    <input name="firstName">
+                  </label>
+                  <label>
+                    <span>Last Name</span>
+                    <input name="lastName">
+                  </label>
+                  <label>
+                    <span>Street</span>
+                    <input name="street">
+                  </label>
+                  <label>
+                    <span>City</span>
+                    <input name="city">
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <input name="state">
+                  </label>
+                  <label>
+                    <span>ZIP</span>
+                    <input name="billingZip">
+                  </label>
+                  <label>
+                    <span>Country</span>
+                    <input name="billingCountry" value="US" maxlength="2">
+                  </label>
+                </div>
+                <label>
+                  <span>Currency</span>
+                  <input name="currency" value="USD" maxlength="3">
+                </label>
+                <button type="submit" class="primary">Authorize Card</button>
+              </form>
+              <div id="paypalAuthResult" class="list-block"></div>
+            </section>
           </section>
 
-          <section class="panel" data-page="charge">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">PayPal NVP/SOAP</p>
-                <h3>Capture Authorization</h3>
+          <section class="two-column" data-page="legacy-card-payments">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">PayPal DirectPayment</p>
+                  <h3>Capture Authorization</h3>
+                </div>
               </div>
-            </div>
-            <form id="paypalCaptureForm" class="form-grid compact-grid">
-              <label>
-                <span>Card</span>
-                <select name="cardId" data-card-select data-manual-target="paypalCaptureManualFields"></select>
-              </label>
-              <div id="paypalCaptureManualFields" class="manual-card-fields full-span" hidden>
-                <label class="full-span">
-                  <span>Auth PNREF</span>
-                  <input name="authorizationPnref" maxlength="12">
+              <form id="paypalCaptureForm" class="form-grid compact-grid">
+                <label>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalCaptureManualFields" data-summary-target="paypalCaptureCardSummary"></select>
                 </label>
+                <div id="paypalCaptureCardSummary" class="card-summary full-span"></div>
+                <div id="paypalCaptureManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Authorization ID</span>
+                    <input name="authorizationPnref">
+                  </label>
+                </div>
+                <label>
+                  <span>Amount</span>
+                  <input name="amount" type="number" step="0.01" required>
+                </label>
+                <label>
+                  <span>Complete</span>
+                  <select name="captureComplete">
+                    <option value="true">yes</option>
+                    <option value="false">no</option>
+                  </select>
+                </label>
+                <button type="submit" class="primary">Capture</button>
+              </form>
+              <div id="paypalCaptureResult" class="list-block"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">PayPal DirectPayment</p>
+                  <h3>Void Authorization</h3>
+                </div>
               </div>
-              <label>
-                <span>Amount</span>
-                <input name="amount" type="number" step="0.01" required>
-              </label>
-              <label>
-                <span>Complete</span>
-                <select name="captureComplete">
-                  <option value="true">yes</option>
-                  <option value="false">no</option>
-                </select>
-              </label>
-              <button type="submit" class="primary">Capture</button>
-            </form>
-            <div id="paypalCaptureResult" class="list-block"></div>
+              <form id="paypalVoidForm" class="form-grid compact-grid">
+                <label>
+                  <span>Card</span>
+                  <select name="cardId" data-card-select data-manual-target="paypalVoidManualFields" data-summary-target="paypalVoidCardSummary"></select>
+                </label>
+                <div id="paypalVoidCardSummary" class="card-summary full-span"></div>
+                <div id="paypalVoidManualFields" class="manual-card-fields full-span" hidden>
+                  <label class="full-span">
+                    <span>Authorization ID</span>
+                    <input name="authorizationPnref">
+                  </label>
+                </div>
+                <label class="full-span">
+                  <span>Note</span>
+                  <input name="note">
+                </label>
+                <button type="submit" class="primary">Void</button>
+              </form>
+              <div id="paypalVoidResult" class="list-block"></div>
+            </section>
+          </section>
+
+          <section class="gateway-page" data-page="card-payments">
+            <section id="cardPaymentProviderListPanel" class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Gateway</p>
+                  <h3>Provider Seç</h3>
+                </div>
+              </div>
+              <div id="cardPaymentProviderList" class="gateway-provider-list"></div>
+            </section>
+
+            <div id="cardPaymentOperationWorkspace" class="two-column gateway-layout" hidden>
+              <section class="panel">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Gateway</p>
+                    <h3 id="cardPaymentSelectedTitle">Card Payment</h3>
+                  </div>
+                  <a href="#/card-payments" id="cardPaymentProviderBack" class="ghost small link-button">Provider Listesi</a>
+                </div>
+                <form id="manualPaymentForm" class="form-grid compact-grid">
+                  <label hidden>
+                    <span>Provider</span>
+                    <select name="provider" required>
+                      <option value="globalpayments">Global Payments</option>
+                      <option value="fluidpay">FluidPay</option>
+                      <option value="propelr">Propelr</option>
+                      <option value="clover">Clover</option>
+                    </select>
+                  </label>
+                  <label hidden>
+                    <span>Action</span>
+                    <select name="operation" required></select>
+                  </label>
+                  <div class="gateway-step-label full-span">İşlem</div>
+                  <div id="cardPaymentOperationTabs" class="card-payment-tabs operation-tabs full-span" role="tablist"></div>
+                  <div id="cardPaymentProviderView" class="provider-method-view full-span"></div>
+                  <div id="cardPaymentMethodView" class="provider-method-view full-span"></div>
+                  <div class="gateway-step-label full-span">Parametreler</div>
+                  <div id="cardPaymentDynamicFields" class="gateway-dynamic-fields full-span"></div>
+                  <div id="manualPaymentCardSummary" class="card-summary full-span" hidden></div>
+                  <button type="submit" class="primary gateway-submit full-span">İşlemi Çalıştır</button>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Result</p>
+                    <h3>Provider Cevabı</h3>
+                  </div>
+                </div>
+                <div id="manualPaymentResult" class="list-block"></div>
+                <div class="section-head provider-gap">
+                  <div>
+                    <p class="eyebrow">Reporting</p>
+                    <h3>Provider Özeti</h3>
+                  </div>
+                  <button id="cardPaymentReportsRefresh" type="button" class="ghost small">Refresh</button>
+                </div>
+                <div id="cardPaymentReportList" class="list-block provider-reports"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="payment-processors-page" data-page="payment-processors" hidden>
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Payment Processors</p>
+                  <h3>Processor İşlem Logları</h3>
+                </div>
+                <button id="paymentProcessorLogsRefresh" type="button" class="ghost small">Refresh</button>
+              </div>
+              <form id="paymentProcessorFilterForm" class="form-grid processor-filter-grid">
+                <label>
+                  <span>Processor</span>
+                  <select name="processor"></select>
+                </label>
+                <label>
+                  <span>İşlem Tipi</span>
+                  <select name="attemptType"></select>
+                </label>
+                <label>
+                  <span>Result</span>
+                  <select name="status"></select>
+                </label>
+                <label>
+                  <span>İşlemi Yapan</span>
+                  <select name="createdByUserId"></select>
+                </label>
+                <label>
+                  <span>Min Miktar</span>
+                  <input name="amountMin" type="text" inputmode="decimal" data-money-format>
+                </label>
+                <button type="submit" class="primary">Filtrele</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Processors</p>
+                  <h3>Processor Menüsü</h3>
+                </div>
+              </div>
+              <div id="paymentProcessorMenu" class="processor-menu"></div>
+            </section>
+
+            <section class="panel wide-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Logs</p>
+                  <h3>İşlem Listesi</h3>
+                </div>
+              </div>
+              <div id="paymentProcessorSummary" class="summary-grid processor-summary"></div>
+              <div id="paymentProcessorLogsList" class="processor-table-wrap"></div>
+            </section>
+          </section>
+
+          <section class="two-column" data-page="iwant-clips-profiles">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Dispute Ops</p>
+                  <h3>Unchargeback</h3>
+                </div>
+              </div>
+              <form id="unchargebackForm" class="form-grid compact-grid">
+                <label>
+                  <span>Case ID</span>
+                  <input name="caseId">
+                </label>
+                <label>
+                  <span>Transaction ID</span>
+                  <input name="transactionId">
+                </label>
+                <label>
+                  <span>Card</span>
+                  <input name="cardId" list="cardOptions" placeholder="Select a card or paste id">
+                </label>
+                <label>
+                  <span>Owner Name</span>
+                  <input name="ownerName" required>
+                </label>
+                <label>
+                  <span>Owner Number</span>
+                  <input name="ownerNumber" required>
+                </label>
+                <label>
+                  <span>Content Price</span>
+                  <input name="contentPrice" type="number" step="0.01" required>
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select name="status">
+                    <option value="new">new</option>
+                    <option value="review">review</option>
+                    <option value="submitted">submitted</option>
+                    <option value="won">won</option>
+                    <option value="lost">lost</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Due Date</span>
+                  <input name="dueDate" type="date">
+                </label>
+                <label class="full-span">
+                  <span>Notes</span>
+                  <textarea name="notes" rows="4"></textarea>
+                </label>
+                <button type="submit" class="primary">Create Case</button>
+              </form>
+              <div id="unchargebackResult" class="list-block"></div>
+            </section>
+
+            <section class="panel wide-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Queue</p>
+                  <h3>Content List</h3>
+                </div>
+              </div>
+              <div id="unchargebackList" class="list-block unchargeback-list"></div>
+            </section>
           </section>
 
           <section class="two-column" data-page="checkers" data-checker-panel="clover">
@@ -695,28 +1238,174 @@
             </section>
           </section>
 
-          <section class="panel" data-page="checkers" data-checker-panel="clover">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">Clover Device</p>
-                <h3>Void Payment</h3>
+          <section class="two-column" data-page="legacy-card-payments">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Clover Tokenize</p>
+                  <h3>Tokenize & Verify</h3>
+                </div>
+                <button id="cloverIframeInitButton" type="button" class="ghost small">Initialize</button>
               </div>
-            </div>
-            <form id="cloverVoidForm" class="form-grid compact-grid">
-              <label>
-                <span>Payment Id</span>
-                <input name="paymentId" required>
-              </label>
-              <label>
-                <span>Void Reason</span>
-                <input name="voidReason" value="USER_CANCEL">
-              </label>
-              <button type="submit" class="primary">Void Payment</button>
-            </form>
-            <div id="cloverVoidResult" class="list-block"></div>
+              <form id="cloverIframeCheckoutForm" class="form-grid compact-grid">
+                <label>
+                  <span>Amount (cents)</span>
+                  <input name="amount" type="number" step="1" value="1">
+                </label>
+                <label>
+                  <span>Currency</span>
+                  <input name="currency" value="usd" maxlength="3">
+                </label>
+                <label class="full-span">
+                  <span>Cardholder Name</span>
+                  <input name="cardholderName" autocomplete="cc-name">
+                </label>
+                <div class="clover-iframe-fields full-span">
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <div id="cloverIframeCardNumber" class="clover-iframe-field"></div>
+                  </label>
+                  <label>
+                    <span>Expiration</span>
+                    <div id="cloverIframeCardDate" class="clover-iframe-field"></div>
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <div id="cloverIframeCardCvv" class="clover-iframe-field"></div>
+                  </label>
+                  <label>
+                    <span>Postal Code</span>
+                    <div id="cloverIframeCardPostalCode" class="clover-iframe-field"></div>
+                  </label>
+                </div>
+                <button type="submit" class="primary">Tokenize Card</button>
+              </form>
+              <div id="cloverIframeStatus" class="list-block"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Result</p>
+                  <h3>Verification</h3>
+                </div>
+              </div>
+              <div id="cloverIframeResult" class="list-block"></div>
+            </section>
           </section>
 
-          <section class="panel" data-page="logs">
+          <section class="two-column" data-page="legacy-card-payments">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Provider Operations</p>
+                  <h3>Kart İşlemleri</h3>
+                </div>
+              </div>
+              <form id="providerOperationForm" class="form-grid compact-grid">
+                <label>
+                  <span>Provider</span>
+                  <select name="provider" required>
+                    <option value="fluidpay">FluidPay</option>
+                    <option value="globalpayments">Global Payments</option>
+                    <option value="propelr">Propelr</option>
+                    <option value="clover">Clover</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Operation</span>
+                  <select name="operation" required>
+                    <option value="verification">Verification + BIN</option>
+                    <option value="authorize">Authorization / Provision</option>
+                    <option value="sale">Sale / Charge</option>
+                    <option value="capture">Capture</option>
+                    <option value="refund">Refund</option>
+                    <option value="void">Void / Reversal</option>
+                  </select>
+                </label>
+                <label class="full-span">
+                  <span>Card Source</span>
+                  <select name="cardId" data-card-select data-manual-target="providerOperationManualFields" data-summary-target="providerOperationCardSummary"></select>
+                </label>
+                <div id="providerOperationCardSummary" class="card-summary full-span"></div>
+                <div id="providerOperationManualFields" class="optional-fields full-span">
+                  <label class="full-span">
+                    <span>Card Number</span>
+                    <input name="pan" autocomplete="off" inputmode="numeric">
+                  </label>
+                  <label>
+                    <span>CVV</span>
+                    <input name="cvv2" autocomplete="off" inputmode="numeric" maxlength="4">
+                  </label>
+                  <label>
+                    <span>Exp Month</span>
+                    <input name="expMonth" maxlength="2">
+                  </label>
+                  <label>
+                    <span>Exp Year</span>
+                    <input name="expYear" maxlength="4">
+                  </label>
+                  <label class="full-span">
+                    <span>Holder Name</span>
+                    <input name="cardholderName" autocomplete="cc-name">
+                  </label>
+                  <label>
+                    <span>Billing ZIP</span>
+                    <input name="billingZip">
+                  </label>
+                  <label>
+                    <span>Country</span>
+                    <input name="billingCountry" value="US">
+                  </label>
+                </div>
+                <label>
+                  <span>Amount (cents)</span>
+                  <input name="amount" type="number" step="1" value="1">
+                </label>
+                <label>
+                  <span>Merchant ID</span>
+                  <input name="merchid" placeholder="Propelr merchid">
+                </label>
+                <label>
+                  <span>Currency</span>
+                  <input name="currency" value="USD" maxlength="3">
+                </label>
+                <label>
+                  <span>Transaction Id</span>
+                  <input name="transactionId">
+                </label>
+                <label>
+                  <span>Provider Token</span>
+                  <input name="token">
+                </label>
+                <label>
+                  <span>Reference / Order</span>
+                  <input name="reference">
+                </label>
+                <label>
+                  <span>IP for BIN Check</span>
+                  <input name="ip">
+                </label>
+                <label class="full-span">
+                  <span>Description</span>
+                  <textarea name="description" rows="3"></textarea>
+                </label>
+                <button type="submit" class="primary">Run Provider Operation</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Result</p>
+                  <h3>Provider + Card Report</h3>
+                </div>
+              </div>
+              <div id="providerOperationResult" class="list-block"></div>
+            </section>
+          </section>
+
+          <section class="panel" data-page="legacy-admin">
             <div class="section-head">
               <div>
                 <p class="eyebrow">Audit</p>
@@ -724,6 +1413,17 @@
               </div>
             </div>
             <div id="auditLogsList" class="list-block"></div>
+          </section>
+
+          <section class="panel wide-panel" data-page="providers">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Providers</p>
+                <h3>Provider Raporları</h3>
+              </div>
+              <button id="providerReportsRefresh" type="button" class="ghost small">Refresh</button>
+            </div>
+            <div id="providerReportsList" class="list-block provider-reports"></div>
           </section>
         </main>
       </section>

@@ -6,10 +6,32 @@ const state = {
   selectedCardId: null,
   users: [],
   auditLogs: [],
+  unchargebackCases: [],
+  providerReports: null,
+  paymentProcessorLogs: null,
+  paymentProcessorHealth: null,
+  paymentProcessorJsonModels: {},
+  providerOperationCatalog: null,
+  burpSuite: {
+    status: null,
+    events: [],
+    pending: [],
+    otpMessages: [],
+    selectedPendingId: null
+  },
+  cloverIframe: {
+    config: null,
+    clover: null,
+    mounted: false,
+    loading: null
+  },
   paymentProviders: null,
+  providerDataLoading: null,
   voiceProviders: null,
   voiceDevice: null,
-  activeVoiceCall: null
+  activeVoiceCall: null,
+  pendingRequests: 0,
+  loadingButtons: new Set()
 };
 
 const elements = {
@@ -43,6 +65,29 @@ const elements = {
   userForm: document.getElementById("userForm"),
   usersList: document.getElementById("usersList"),
   auditLogsList: document.getElementById("auditLogsList"),
+  providerReportsList: document.getElementById("providerReportsList"),
+  providerReportsRefresh: document.getElementById("providerReportsRefresh"),
+  paymentProcessorFilterForm: document.getElementById("paymentProcessorFilterForm"),
+  paymentProcessorMenu: document.getElementById("paymentProcessorMenu"),
+  paymentProcessorSummary: document.getElementById("paymentProcessorSummary"),
+  paymentProcessorLogsList: document.getElementById("paymentProcessorLogsList"),
+  paymentProcessorLogsRefresh: document.getElementById("paymentProcessorLogsRefresh"),
+  manualPaymentForm: document.getElementById("manualPaymentForm"),
+  manualPaymentResult: document.getElementById("manualPaymentResult"),
+  manualPaymentCardSummary: document.getElementById("manualPaymentCardSummary"),
+  cardPaymentProviderListPanel: document.getElementById("cardPaymentProviderListPanel"),
+  cardPaymentProviderList: document.getElementById("cardPaymentProviderList"),
+  cardPaymentOperationWorkspace: document.getElementById("cardPaymentOperationWorkspace"),
+  cardPaymentSelectedTitle: document.getElementById("cardPaymentSelectedTitle"),
+  cardPaymentProviderBack: document.getElementById("cardPaymentProviderBack"),
+  cardPaymentOperationTabs: document.getElementById("cardPaymentOperationTabs"),
+  cardPaymentProviderView: document.getElementById("cardPaymentProviderView"),
+  cardPaymentMethodView: document.getElementById("cardPaymentMethodView"),
+  cardPaymentDynamicFields: document.getElementById("cardPaymentDynamicFields"),
+  cardPaymentReportList: document.getElementById("cardPaymentReportList"),
+  cardPaymentReportsRefresh: document.getElementById("cardPaymentReportsRefresh"),
+  providerOperationForm: document.getElementById("providerOperationForm"),
+  providerOperationResult: document.getElementById("providerOperationResult"),
   paymentProvidersList: document.getElementById("paymentProvidersList"),
   voiceProvidersList: document.getElementById("voiceProvidersList"),
   validationForm: document.getElementById("validationForm"),
@@ -62,18 +107,47 @@ const elements = {
   paypalManagerInquiryResult: document.getElementById("paypalManagerInquiryResult"),
   paypalBinCheckForm: document.getElementById("paypalBinCheckForm"),
   paypalBinCheckResult: document.getElementById("paypalBinCheckResult"),
+  cloverVerifyForm: document.getElementById("cloverVerifyForm"),
+  cloverVerifyResult: document.getElementById("cloverVerifyResult"),
   paypalLiveCheckForm: document.getElementById("paypalLiveCheckForm"),
   paypalLiveCheckResult: document.getElementById("paypalLiveCheckResult"),
+  paypalSaleForm: document.getElementById("paypalSaleForm"),
+  paypalSaleResult: document.getElementById("paypalSaleResult"),
   paypalAuthForm: document.getElementById("paypalAuthForm"),
   paypalAuthResult: document.getElementById("paypalAuthResult"),
   paypalCaptureForm: document.getElementById("paypalCaptureForm"),
   paypalCaptureResult: document.getElementById("paypalCaptureResult"),
+  paypalVoidForm: document.getElementById("paypalVoidForm"),
+  paypalVoidResult: document.getElementById("paypalVoidResult"),
   cloverPreauthForm: document.getElementById("cloverPreauthForm"),
   cloverPreauthResult: document.getElementById("cloverPreauthResult"),
   cloverRefundForm: document.getElementById("cloverRefundForm"),
   cloverRefundResult: document.getElementById("cloverRefundResult"),
-  cloverVoidForm: document.getElementById("cloverVoidForm"),
-  cloverVoidResult: document.getElementById("cloverVoidResult"),
+  cloverIframeCheckoutForm: document.getElementById("cloverIframeCheckoutForm"),
+  cloverIframeInitButton: document.getElementById("cloverIframeInitButton"),
+  cloverIframeStatus: document.getElementById("cloverIframeStatus"),
+  cloverIframeResult: document.getElementById("cloverIframeResult"),
+  cloverIframeCardNumber: document.getElementById("cloverIframeCardNumber"),
+  cloverIframeCardDate: document.getElementById("cloverIframeCardDate"),
+  cloverIframeCardCvv: document.getElementById("cloverIframeCardCvv"),
+  cloverIframeCardPostalCode: document.getElementById("cloverIframeCardPostalCode"),
+  cloverLearningForm: document.getElementById("cloverLearningForm"),
+  cloverLearningStatus: document.getElementById("cloverLearningStatus"),
+  cloverLearningResult: document.getElementById("cloverLearningResult"),
+  cloverLearningRefreshButton: document.getElementById("cloverLearningRefreshButton"),
+  unchargebackForm: document.getElementById("unchargebackForm"),
+  unchargebackResult: document.getElementById("unchargebackResult"),
+  unchargebackList: document.getElementById("unchargebackList"),
+  burpStartForm: document.getElementById("burpStartForm"),
+  burpStopButton: document.getElementById("burpStopButton"),
+  burpRefreshButton: document.getElementById("burpRefreshButton"),
+  burpArmOtpForm: document.getElementById("burpArmOtpForm"),
+  burpStatus: document.getElementById("burpStatus"),
+  burpTrafficList: document.getElementById("burpTrafficList"),
+  burpPendingList: document.getElementById("burpPendingList"),
+  burpReleaseForm: document.getElementById("burpReleaseForm"),
+  burpOtpSendForm: document.getElementById("burpOtpSendForm"),
+  burpOtpSendResult: document.getElementById("burpOtpSendResult"),
   modalOverlay: document.getElementById("modalOverlay"),
   modalEyebrow: document.getElementById("modalEyebrow"),
   modalTitle: document.getElementById("modalTitle"),
@@ -87,6 +161,172 @@ const elements = {
 
 const API_PREFIX = "/api";
 const MANUAL_CARD_VALUE = "__manual";
+const CLOVER_IFRAME_SCRIPT_ID = "clover-iframe-sdk";
+const PROCESSOR_ATTEMPT_TYPES = ["auth_check", "sale_check", "capture", "refund", "void", "live_check", "bin_check", "balance_check", "iframe_verify"];
+const PROCESSOR_STATUSES = ["approved", "success", "failed", "declined", "recorded", "unknown"];
+const CARD_PAYMENT_CARD_INPUT_FIELDS = new Set(["pan", "source", "expiry", "cvv2", "cvv", "expMonth", "expYear"]);
+
+const STORED_CREDENTIAL_SCENARIO_OPTIONS = [
+  { value: "", label: "No stored credential scenario" },
+  { value: "one_time_online_purchase", label: "One-Time Online Purchase" },
+  { value: "one_time_phone_purchase", label: "One-Time Phone Purchase" },
+  { value: "one_time_phone_stored_profile", label: "One-Time Phone Purchase with Stored Profile" },
+  { value: "online_one_time_zero_auth", label: "Online One-Time $0 Authorization" },
+  { value: "online_subscription_zero_auth", label: "Online Subscription $0 Authorization" },
+  { value: "online_subscription_initial_payment", label: "Online Subscription Initial Payment" },
+  { value: "online_subscription_returning_customer", label: "Online Subscription Returning Customer" },
+  { value: "split_charge_in_stock", label: "Split Charge: In-Stock Charge" },
+  { value: "split_charge_remainder", label: "Split Charge: Remainder Charge" }
+];
+
+const CARD_PAYMENT_FIELD_CONFIG = {
+  cardId: {
+    label: "Saved Card",
+    className: "full-span",
+    type: "select",
+    options: () => getSavedCardSelectOptions()
+  },
+  storedCredentialScenario: {
+    label: "Payment Scenario",
+    className: "full-span",
+    type: "select",
+    options: STORED_CREDENTIAL_SCENARIO_OPTIONS
+  },
+  pan: { label: "Card Number", className: "full-span", autocomplete: "off", inputmode: "numeric" },
+  source: { label: "Source Token", className: "full-span", autocomplete: "off", placeholder: "Clover source token" },
+  expiry: { label: "SKT (MMYY)", autocomplete: "off", inputmode: "numeric", maxlength: "4", placeholder: "1228" },
+  cvv2: { label: "CVV", autocomplete: "off", inputmode: "numeric", maxlength: "4" },
+  cvv: { label: "CVV", autocomplete: "off", inputmode: "numeric", maxlength: "4" },
+  expMonth: {
+    label: "Exp Month",
+    type: "select",
+    options: () => [
+      { value: "", label: "Month" },
+      ...Array.from({ length: 12 }, (_, index) => {
+        const value = String(index + 1).padStart(2, "0");
+        return { value, label: value };
+      })
+    ]
+  },
+  expYear: {
+    label: "Exp Year",
+    type: "select",
+    options: () => {
+      const currentYear = new Date().getFullYear();
+      return [
+        { value: "", label: "Year" },
+        ...Array.from({ length: 16 }, (_, index) => {
+          const value = String(currentYear + index);
+          return { value, label: value };
+        })
+      ];
+    }
+  },
+  cardholderName: { label: "Holder Name", className: "full-span", autocomplete: "cc-name" },
+  billingZip: { label: "Billing ZIP" },
+  billingCountry: { label: "Country", maxlength: "2", defaultValue: "US" },
+  amount: { label: "Amount", type: "text", inputmode: "decimal", defaultValue: "1000" },
+  sequenceAmount1: { label: "Request 1 Amount", type: "text", inputmode: "decimal", defaultValue: "1,100.12" },
+  sequenceAmount2: { label: "Request 2 Amount", type: "text", inputmode: "decimal", defaultValue: "1,100.25" },
+  merchid: { label: "Merchant ID", placeholder: "Provider merchid" },
+  retref: { label: "Retref", className: "full-span", autocomplete: "off", placeholder: "Provider retref" },
+  routingNumber: { label: "Routing Number", autocomplete: "off", inputmode: "numeric", maxlength: "9" },
+  accountNumber: { label: "Account Number", className: "full-span", autocomplete: "off", inputmode: "numeric" },
+  accountHolderName: { label: "Account Holder", className: "full-span", autocomplete: "off", defaultValue: "ACH Test Account" },
+  achEntryCode: {
+    label: "ACH Entry Code",
+    type: "select",
+    defaultValue: "WEB",
+    options: [
+      { value: "WEB", label: "WEB" },
+      { value: "PPD", label: "PPD" },
+      { value: "CCD", label: "CCD" }
+    ]
+  },
+  balanceAmount: { label: "Balance Amount", type: "number", step: "0.01" },
+  currency: { label: "Currency", maxlength: "3", defaultValue: "USD" },
+  reference: { label: "Reference / Order", className: "full-span" },
+  transactionId: { label: "Transaction Id", className: "full-span" },
+  token: { label: "Token", className: "full-span", autocomplete: "off" },
+  ip: { label: "Customer IP", placeholder: "127.0.0.1" },
+  description: { label: "Description", className: "full-span" },
+  captureComplete: {
+    label: "Complete Capture",
+    type: "select",
+    options: [
+      { value: "true", label: "yes" },
+      { value: "false", label: "no" }
+    ],
+    defaultValue: "true"
+  }
+};
+
+function ensureBusyIndicator() {
+  let indicator = document.getElementById("globalBusyIndicator");
+  if (!indicator) {
+    indicator = document.createElement("div");
+    indicator.id = "globalBusyIndicator";
+    indicator.className = "global-busy";
+    indicator.setAttribute("role", "status");
+    indicator.setAttribute("aria-live", "polite");
+    indicator.innerHTML = `<span class="busy-spinner"></span><strong>İşlem yapılıyor</strong>`;
+    document.body.appendChild(indicator);
+  }
+  return indicator;
+}
+
+function setButtonLoading(button, loading) {
+  if (!button) {
+    return;
+  }
+
+  if (loading) {
+    if (!button.dataset.originalText) {
+      button.dataset.originalText = button.textContent.trim();
+    }
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.textContent = "İşlem yapılıyor...";
+    state.loadingButtons.add(button);
+    return;
+  }
+
+  button.disabled = false;
+  button.classList.remove("is-loading");
+  if (button.dataset.originalText) {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+  state.loadingButtons.delete(button);
+}
+
+function rememberActionButton(button) {
+  if (!button || !button.matches("button")) {
+    return;
+  }
+  setButtonLoading(button, true);
+}
+
+function setGlobalBusy(active) {
+  const indicator = ensureBusyIndicator();
+  indicator.classList.toggle("active", active);
+  document.body.classList.toggle("has-pending-action", active);
+  if (!active) {
+    Array.from(state.loadingButtons).forEach((button) => setButtonLoading(button, false));
+  }
+}
+
+function beginRequest() {
+  state.pendingRequests += 1;
+  setGlobalBusy(true);
+}
+
+function endRequest() {
+  state.pendingRequests = Math.max(0, state.pendingRequests - 1);
+  if (state.pendingRequests === 0) {
+    setGlobalBusy(false);
+  }
+}
 
 function setView(loggedIn) {
   elements.loginView.hidden = loggedIn;
@@ -101,36 +341,44 @@ function getHeaders() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(`${API_PREFIX}${path}`, {
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
-      ...(options.headers || {})
+  beginRequest();
+  try {
+    const response = await fetch(`${API_PREFIX}${path}`, {
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (response.status === 401) {
+      if (path === "/auth/login") {
+        throw new Error(data?.error || "Invalid credentials");
+      }
+
+      if (state.token) {
+        logout();
+        throw new Error("Session expired");
+      }
+
+      throw new Error(data?.error || "Authentication required");
     }
-  });
 
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-
-  if (response.status === 401) {
-    if (path === "/auth/login") {
-      throw new Error(data?.error || "Invalid credentials");
+    if (!response.ok) {
+      const error = new Error(data?.failureReason || data?.responseMessage || data?.error || "Request failed");
+      error.status = response.status;
+      error.data = data;
+      throw error;
     }
 
-    if (state.token) {
-      logout();
-      throw new Error("Session expired");
-    }
-
-    throw new Error(data?.error || "Authentication required");
+    return data;
+  } finally {
+    endRequest();
   }
-
-  if (!response.ok) {
-    throw new Error(data?.error || "Request failed");
-  }
-
-  return data;
 }
 
 async function getTwilioDeviceConstructor() {
@@ -207,6 +455,15 @@ function removeEmptyFields(payload) {
   return payload;
 }
 
+function errorResponsePayload(error) {
+  return error?.data || {
+    status: "failed",
+    httpStatus: error?.status || null,
+    responseMessage: error?.message || "Request failed",
+    failureReason: error?.message || "Request failed"
+  };
+}
+
 function updateIdentity() {
   if (!state.user) {
     return;
@@ -228,13 +485,33 @@ function getCurrentRoute() {
   return hash.replace(/^#\//, "") || "cards";
 }
 
+function getCardPaymentRouteProvider(route = getCurrentRoute()) {
+  const match = String(route).match(/^card-payments\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function getPaymentProcessorRouteKey(route = getCurrentRoute()) {
+  const match = String(route).match(/^payment-processors\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 function renderRoute() {
   const route = getCurrentRoute();
-  const allowedRoutes = new Set(["cards", "provision", "charge", "checkers", "users", "logs"]);
-  const requestedRoute = allowedRoutes.has(route) ? route : "cards";
-  const activeRoute = requestedRoute === "users" && !can("canManageUsers") ? "cards" : requestedRoute;
+  const routeBase = route.split("/")[0];
+  const routeAliases = {
+    "payment-test": "card-payments",
+    "legacy-payment": "card-payments",
+    "clover-checkout": "card-payments",
+    "clover-learning": "checkers",
+    "provider-reports": "providers",
+    "unchargeback": "iwant-clips-profiles"
+  };
+  const normalizedRoute = routeAliases[route] || routeAliases[routeBase] || routeBase || route;
+  const allowedRoutes = new Set(["checkers", "card-payments", "payment-processors", "cards", "providers", "burp-suite", "iwant-clips-profiles"]);
+  const requestedRoute = allowedRoutes.has(normalizedRoute) ? normalizedRoute : "checkers";
+  const activeRoute = requestedRoute;
 
-  if (activeRoute !== route) {
+  if (activeRoute !== route && !(activeRoute === "card-payments" && routeBase === "card-payments") && !(activeRoute === "payment-processors" && routeBase === "payment-processors")) {
     window.location.hash = `#/${activeRoute}`;
     return;
   }
@@ -248,8 +525,47 @@ function renderRoute() {
     link.classList.toggle("active", link.dataset.routeLink === activeRoute);
   });
 
+  if (activeRoute === "providers" && state.user) {
+    loadProviderReports().catch((error) => {
+      elements.providerReportsList.innerHTML = `<article class="list-card"><strong>Provider Report Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+    });
+  }
+  if (activeRoute === "payment-processors" && state.user) {
+    applyPaymentProcessorRouteFilter();
+    loadPaymentProcessorLogs().catch((error) => {
+      if (elements.paymentProcessorLogsList) {
+        elements.paymentProcessorLogsList.innerHTML = `<article class="list-card"><strong>Processor Log Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+      }
+    });
+  }
+  if (activeRoute === "card-payments" && state.user) {
+    applyCardPaymentRouteProvider();
+    renderCardPaymentProviderList();
+    syncManualPaymentMode();
+    ensureProviderDataLoaded().catch((error) => {
+      if (elements.cardPaymentProviderList) {
+        elements.cardPaymentProviderList.innerHTML = `<article class="list-card"><strong>Provider Catalog Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+      }
+    });
+    loadProviderReports().catch((error) => {
+      if (elements.cardPaymentReportList) {
+        elements.cardPaymentReportList.innerHTML = `<article class="list-card"><strong>Provider Report Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+      }
+    });
+  }
+  if (activeRoute === "burp-suite" && state.user) {
+    loadBurpSuiteTraffic().catch((error) => {
+      elements.burpStatus.innerHTML = `<article class="list-card"><strong>Burp Status Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+    });
+  }
   if (activeRoute === "checkers") {
-    showCheckerTab(document.querySelector("[data-checker-tab].active")?.dataset.checkerTab || "cards");
+    const activeCheckerTab = document.querySelector("[data-checker-tab].active")?.dataset.checkerTab || "cards";
+    showCheckerTab(activeCheckerTab);
+  }
+  if (activeRoute === "checkers" && state.user) {
+    loadCloverLearningStatus().catch((error) => {
+      renderGenericProviderResult(elements.cloverLearningStatus, "Machine Learning Error", { error: error.message });
+    });
   }
 }
 
@@ -280,11 +596,969 @@ function renderPaymentProviders() {
     <article class="list-card">
       <strong>${escapeHtml(key.toUpperCase())}</strong>
       <div>Base URL: ${escapeHtml(provider.baseUrl || "-")}</div>
-      <div>${key === "clover" ? `Merchant ID: ${escapeHtml(provider.merchantId || "-")}` : `REST: ${provider.restConfigured ? "configured" : "missing config"}`}</div>
+      <div>${key === "clover" ? `Merchant ID: ${escapeHtml(provider.merchantId || "-")}` : key === "fluidpay" ? `API key: ${provider.configured ? "configured" : "missing config"}` : key === "globalpayments" ? `App credentials: ${provider.configured ? "configured" : "missing config"}` : key === "propelrpay" || key === "propelr" ? `API key: ${provider.configured ? "configured" : "missing config"}` : `REST: ${provider.restConfigured ? "configured" : "missing config"}`}</div>
+      ${key === "fluidpay" ? `<div>Processor ID: ${escapeHtml(provider.processorId || "-")}</div>` : ""}
+      ${key === "globalpayments" ? `<div>Mode: ${escapeHtml(provider.mode || "-")} · Account: ${escapeHtml(provider.accountName || "-")} · Channel: ${escapeHtml(provider.channel || "-")} · Key type: ${escapeHtml(provider.keyType || "-")}</div>` : ""}
+      ${key === "propelrpay" || key === "propelr" ? `<pre>${escapeHtml(JSON.stringify(provider.operationPathsConfigured || {}, null, 2))}</pre>` : ""}
       ${provider.nvp ? `<div>NVP/SOAP: ${provider.nvp.configured ? "configured" : "missing config"} · ${escapeHtml(provider.nvp.baseUrl || "-")}</div>` : ""}
       ${provider.manager ? `<div>Manager: ${provider.manager.configured ? "configured" : "missing config"} · ${escapeHtml(provider.manager.baseUrl || "-")}</div>` : ""}
     </article>
   `).join("");
+}
+
+function getCardPaymentCatalog() {
+  return state.providerOperationCatalog || {};
+}
+
+function getSelectedCardPaymentProvider() {
+  const providerKey = elements.manualPaymentForm?.elements?.provider?.value || "propelr";
+  return getCardPaymentCatalog()[providerKey] || getCardPaymentCatalog().propelr || null;
+}
+
+function getSelectedCardPaymentMethod() {
+  const provider = getSelectedCardPaymentProvider();
+  const operationKey = elements.manualPaymentForm?.elements?.operation?.value;
+  return provider?.methods?.find((method) => method.key === operationKey) || provider?.methods?.[0] || null;
+}
+
+function getCardPaymentProviderHref(providerKey) {
+  return `#/card-payments/${encodeURIComponent(providerKey)}`;
+}
+
+function isCardPaymentProviderSelected() {
+  return Boolean(getCardPaymentRouteProvider());
+}
+
+function applyCardPaymentRouteProvider() {
+  const providerKey = getCardPaymentRouteProvider();
+  const providerSelect = elements.manualPaymentForm?.elements?.provider;
+  if (!providerSelect) {
+    return;
+  }
+  if (!providerKey) {
+    return;
+  }
+  const catalog = getCardPaymentCatalog();
+  if (!catalog[providerKey]) {
+    window.location.hash = "#/card-payments";
+    return;
+  }
+  if (providerSelect.value !== providerKey) {
+    providerSelect.value = providerKey;
+    populateManualPaymentOperations({ preserve: false });
+  }
+}
+
+function renderCardPaymentProviderList() {
+  if (!elements.cardPaymentProviderList) {
+    return;
+  }
+  const providers = Object.values(getCardPaymentCatalog());
+  elements.cardPaymentProviderList.innerHTML = providers.length
+    ? providers.map((provider) => `
+      <a class="gateway-provider-row" href="${escapeHtml(getCardPaymentProviderHref(provider.key))}">
+        <div>
+          <strong>${escapeHtml(provider.label || provider.key)}</strong>
+          <span>${escapeHtml(provider.description || "Payment provider")}</span>
+        </div>
+        <div class="gateway-provider-row-meta">
+          <span class="status-pill ${provider.configured ? "status-good" : "status-bad"}">${provider.configured ? "configured" : "missing config"}</span>
+          <span>${escapeHtml(provider.methods?.length || 0)} işlem</span>
+        </div>
+      </a>
+    `).join("")
+    : `<article class="list-card">Provider catalog loading.</article>`;
+}
+
+function syncCardPaymentPageMode() {
+  const selected = isCardPaymentProviderSelected();
+  if (elements.cardPaymentProviderListPanel) {
+    elements.cardPaymentProviderListPanel.hidden = selected;
+  }
+  if (elements.cardPaymentOperationWorkspace) {
+    elements.cardPaymentOperationWorkspace.hidden = !selected;
+  }
+}
+
+function populateManualPaymentProviders({ preserve = true } = {}) {
+  const form = elements.manualPaymentForm;
+  const providerSelect = form?.elements?.provider;
+  const catalog = getCardPaymentCatalog();
+  const providers = Object.values(catalog);
+  if (!providerSelect || providers.length === 0) {
+    renderCardPaymentProviderList();
+    return;
+  }
+
+  const routeProvider = getCardPaymentRouteProvider();
+  const previous = routeProvider || (preserve ? providerSelect.value : "");
+  providerSelect.innerHTML = providers
+    .map((provider) => `<option value="${escapeHtml(provider.key)}">${escapeHtml(provider.label || provider.key)}</option>`)
+    .join("");
+
+  providerSelect.value = providers.some((provider) => provider.key === previous)
+    ? previous
+    : providers[0].key;
+  renderCardPaymentProviderList();
+}
+
+function populateManualPaymentOperations({ preserve = true } = {}) {
+  const form = elements.manualPaymentForm;
+  const operationSelect = form?.elements?.operation;
+  const provider = getSelectedCardPaymentProvider();
+  if (!operationSelect || !provider?.methods?.length) {
+    renderCardPaymentOperationTabs(provider, null);
+    return;
+  }
+
+  const previous = preserve ? operationSelect.value : "";
+  operationSelect.innerHTML = provider.methods
+    .map((method) => `<option value="${escapeHtml(method.key)}">${escapeHtml(method.label)}</option>`)
+    .join("");
+
+  const nextValue = provider.methods.some((method) => method.key === previous)
+    ? previous
+    : provider.methods[0].key;
+  operationSelect.value = nextValue;
+  renderCardPaymentOperationTabs(provider, getSelectedCardPaymentMethod());
+}
+
+function renderCardPaymentOperationTabs(provider, method) {
+  if (!elements.cardPaymentOperationTabs) {
+    return;
+  }
+  elements.cardPaymentOperationTabs.innerHTML = provider?.methods?.length
+    ? provider.methods.map((item) => `
+      <button
+        type="button"
+        class="gateway-tab small ${item.key === method?.key ? "active" : ""}"
+        data-card-payment-operation="${escapeHtml(item.key)}"
+      >${escapeHtml(item.label)}</button>
+    `).join("")
+    : `<span class="summary-empty">No operations for this provider.</span>`;
+}
+
+function renderCardPaymentProviderView(provider, method) {
+  if (!elements.cardPaymentProviderView || !elements.cardPaymentMethodView) {
+    return;
+  }
+
+  if (!provider || !method) {
+    elements.cardPaymentProviderView.innerHTML = `<div class="summary-empty">Provider catalog not loaded.</div>`;
+    elements.cardPaymentMethodView.innerHTML = "";
+    elements.cardPaymentMethodView.hidden = true;
+    return;
+  }
+
+  elements.cardPaymentMethodView.hidden = true;
+  elements.cardPaymentProviderView.innerHTML = `
+    <div class="gateway-selection-summary">
+      <div>
+        <span>Provider</span>
+        <strong>${escapeHtml(provider.label || provider.key)}</strong>
+      </div>
+      <div>
+        <span>İşlem</span>
+        <strong>${escapeHtml(method.label)}</strong>
+      </div>
+      <div>
+        <span>Durum</span>
+        <strong class="${provider.configured ? "status-good-text" : "status-bad-text"}">${provider.configured ? "configured" : "missing config"}</strong>
+      </div>
+    </div>
+  `;
+  elements.cardPaymentMethodView.innerHTML = "";
+}
+
+function collectCardPaymentFormValues() {
+  if (!elements.manualPaymentForm) {
+    return {};
+  }
+  return formToObject(elements.manualPaymentForm);
+}
+
+function getCardPaymentMethodFields(provider, method) {
+  const fields = method?.fields || [];
+  const hasCardInput = fields.some((name) => CARD_PAYMENT_CARD_INPUT_FIELDS.has(name));
+  const values = [];
+  if (hasCardInput) {
+    values.push("cardId");
+    values.push("storedCredentialScenario");
+  }
+  fields.forEach((name) => {
+    if (CARD_PAYMENT_FIELD_CONFIG[name] && !values.includes(name)) {
+      values.push(name);
+    }
+  });
+  if (hasCardInput && !fields.includes("source")) {
+    ["cardholderName", "billingZip", "billingCountry"].forEach((name) => {
+      if (!values.includes(name)) {
+        values.push(name);
+      }
+    });
+  }
+  if (fields.includes("amount") && !fields.includes("currency") && provider?.key !== "propelr") {
+    values.push("currency");
+  }
+  if (!values.includes("reference") && ["sale", "auth", "verification"].includes(method?.operation) && provider?.key !== "propelr") {
+    values.push("reference");
+  }
+  return values;
+}
+
+function renderCardPaymentInput(name, config, value, required, context = {}) {
+  const labelClass = config.className ? ` class="${escapeHtml(config.className)}"` : "";
+  const attrs = [
+    `name="${escapeHtml(name)}"`,
+    config.type && config.type !== "select" ? `type="${escapeHtml(config.type)}"` : "",
+    config.autocomplete ? `autocomplete="${escapeHtml(config.autocomplete)}"` : "",
+    config.inputmode ? `inputmode="${escapeHtml(config.inputmode)}"` : "",
+    config.maxlength ? `maxlength="${escapeHtml(config.maxlength)}"` : "",
+    config.step ? `step="${escapeHtml(config.step)}"` : "",
+    config.list ? `list="${escapeHtml(config.list)}"` : "",
+    config.placeholder ? `placeholder="${escapeHtml(config.placeholder)}"` : "",
+    required ? "required" : ""
+  ].filter(Boolean).join(" ");
+
+  if (config.type === "select") {
+    const options = typeof config.options === "function"
+      ? config.options({ ...context, name, value })
+      : config.options || [];
+    return `
+      <label${labelClass}>
+        <span>${escapeHtml(config.label)}</span>
+        <select name="${escapeHtml(name)}" ${required ? "required" : ""}>
+          ${options.map((option) => `
+            <option value="${escapeHtml(option.value)}" ${String(value) === String(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>
+          `).join("")}
+        </select>
+      </label>
+    `;
+  }
+
+  return `
+    <label${labelClass}>
+      <span>${escapeHtml(config.label)}</span>
+      <input ${attrs} value="${escapeHtml(value ?? "")}">
+    </label>
+  `;
+}
+
+function renderCardPaymentDynamicFields(provider, method) {
+  if (!elements.cardPaymentDynamicFields) {
+    return;
+  }
+
+  if (!provider || !method) {
+    elements.cardPaymentDynamicFields.innerHTML = `<div class="summary-empty">Provider ve metod seçimi bekleniyor.</div>`;
+    if (elements.manualPaymentCardSummary) {
+      elements.manualPaymentCardSummary.hidden = true;
+    }
+    return;
+  }
+
+  const currentValues = collectCardPaymentFormValues();
+  const requiredFields = new Set(method.required || []);
+  const propelrConfig = state.paymentProviders?.propelrpay || state.paymentProviders?.propelr || {};
+  const isPropelrMerchantConfigured = Boolean(propelrConfig.merchantConfigured);
+  const fields = getCardPaymentMethodFields(provider, method).filter((name) => {
+    return name !== "merchid" || provider.key !== "propelr" || !isPropelrMerchantConfigured;
+  });
+
+  elements.cardPaymentDynamicFields.innerHTML = fields.map((name) => {
+    const config = CARD_PAYMENT_FIELD_CONFIG[name];
+    const defaultValue = typeof config.defaultValue === "function"
+      ? config.defaultValue({ provider, method })
+      : config.defaultValue;
+    const value = currentValues[name] ?? defaultValue ?? "";
+    const required = requiredFields.has(name) && name !== "cardId";
+    return renderCardPaymentInput(name, config, value, required, { provider, method });
+  }).join("");
+
+  const amount = elements.manualPaymentForm?.elements?.amount;
+  if (amount) {
+    amount.placeholder = provider.key === "propelr" ? "1100.12" : "1000";
+  }
+  syncManualPaymentCardSearch();
+  applyStoredCredentialScenarioDefaults();
+}
+
+function applyStoredCredentialScenarioDefaults() {
+  const form = elements.manualPaymentForm;
+  const scenario = form?.elements?.storedCredentialScenario?.value || "";
+  const amount = form?.elements?.amount;
+  if (!amount) {
+    return;
+  }
+  if (["online_one_time_zero_auth", "online_subscription_zero_auth"].includes(scenario)) {
+    amount.value = "0.00";
+  }
+}
+
+function formatProviderGroupLabel(group) {
+  return String(group || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatMissingConfig(missing) {
+  if (!missing) {
+    return "-";
+  }
+  if (Array.isArray(missing)) {
+    return missing.length ? missing.join(", ") : "-";
+  }
+  return Object.entries(missing)
+    .map(([key, values]) => `${key}: ${Array.isArray(values) && values.length ? values.join(", ") : "-"}`)
+    .join(" | ");
+}
+
+function renderProviderTransaction(item) {
+  const raw = item.raw_response || item.details || {};
+  const message = raw.result?.responseMessage || raw.verification?.responseMessage || raw.binCheck?.status || raw.responseMessage || raw.error || "-";
+  return `
+    <article class="list-card provider-transaction">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(item.attempt_type || item.action || "-")}</strong>
+        <span class="status-pill ${statusClass(item.status)}">${escapeHtml(item.status || "-")}</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Provider": item.provider || item.entity_type,
+        "Message": message,
+        "Created": item.created_at,
+        "Amount": item.amount,
+        "Currency": item.currency,
+        "Reference": item.provider_reference_id || item.entity_id
+      })}
+    </article>
+  `;
+}
+
+function renderProviderReportsInto(target) {
+  if (!target) {
+    return;
+  }
+  const report = state.providerReports;
+  if (!report) {
+    target.innerHTML = `<article class="list-card">Provider report not loaded yet.</article>`;
+    return;
+  }
+
+  const envHelp = report.envHelp || {};
+  const envHelpHtml = `
+    <article class="list-card provider-report-card">
+      <strong>Dev Config Eksikleri</strong>
+      <div class="summary-grid provider-report-summary">
+        <div><span>FluidPay Missing</span><strong>${escapeHtml(formatMissingConfig(envHelp.fluidpay?.missing))}</strong></div>
+        <div><span>Global Payments Missing</span><strong>${escapeHtml(formatMissingConfig(envHelp.globalpayments?.missing))}</strong></div>
+        <div><span>PropelrPay Missing</span><strong>${escapeHtml(formatMissingConfig(envHelp.propelrpay?.missing))}</strong></div>
+        <div><span>Clover Missing</span><strong>${escapeHtml(formatMissingConfig(envHelp.clover?.missing))}</strong></div>
+        <div><span>Clover Tokenize</span><strong>${escapeHtml(formatMissingConfig(envHelp.clover?.iframeMissing))}</strong></div>
+      </div>
+    </article>
+  `;
+
+  target.innerHTML = envHelpHtml + Object.entries(report.groups || {}).map(([group, providers]) => `
+    <section class="provider-report-group">
+      <div class="section-head provider-report-group-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(formatProviderGroupLabel(group))}</p>
+          <h3>${escapeHtml(providers.length)} Provider</h3>
+        </div>
+      </div>
+      ${providers.map((provider) => `
+        <article class="list-card provider-report-card">
+          <div class="provider-report-top">
+            <div>
+              <strong>${escapeHtml(provider.label)}</strong>
+              <div>${escapeHtml(provider.capabilities.join(", "))}</div>
+            </div>
+            <span class="status-pill ${provider.configured ? "status-good" : "status-bad"}">${provider.configured ? "configured" : "missing config"}</span>
+          </div>
+          <div class="summary-grid provider-report-summary">
+            <div><span>Missing</span><strong>${escapeHtml(formatMissingConfig(provider.missing))}</strong></div>
+            <div><span>Optional Missing</span><strong>${escapeHtml(formatMissingConfig(provider.optionalMissing))}</strong></div>
+            <div><span>Transactions</span><strong>${escapeHtml(provider.transactionCount || 0)}</strong></div>
+            <div><span>Audit Logs</span><strong>${escapeHtml(provider.auditCount || 0)}</strong></div>
+          </div>
+          <div class="provider-report-notes">
+            ${(provider.configNotes || []).map((note) => `<div>${escapeHtml(note)}</div>`).join("")}
+          </div>
+          <details open>
+            <summary>Transactions (${escapeHtml(provider.transactions.length)})</summary>
+            <div class="provider-report-items">
+              ${provider.transactions.length ? provider.transactions.map(renderProviderTransaction).join("") : `<article class="list-card">No transactions yet.</article>`}
+            </div>
+          </details>
+          <details>
+            <summary>Audit Logs (${escapeHtml(provider.auditLogs.length)})</summary>
+            <div class="provider-report-items">
+              ${provider.auditLogs.length ? provider.auditLogs.map((log) => renderProviderTransaction({
+                ...log,
+                action: log.action,
+                status: log.status,
+                entity_type: log.entity_type,
+                entity_id: log.entity_id,
+                details: log.details
+              })).join("") : `<article class="list-card">No audit logs yet.</article>`}
+            </div>
+          </details>
+        </article>
+      `).join("")}
+    </section>
+  `).join("");
+}
+
+function renderProviderReports() {
+  renderProviderReportsInto(elements.providerReportsList);
+  renderCardPaymentReportSummary();
+}
+
+function renderCardPaymentReportSummary() {
+  if (!elements.cardPaymentReportList) {
+    return;
+  }
+  const report = state.providerReports;
+  if (!report) {
+    elements.cardPaymentReportList.innerHTML = `<article class="list-card">Report not loaded yet.</article>`;
+    return;
+  }
+
+  const providers = Object.values(report.groups || {}).flat();
+  const totalTransactions = providers.reduce((sum, provider) => sum + Number(provider.transactionCount || 0), 0);
+  const totalAuditLogs = providers.reduce((sum, provider) => sum + Number(provider.auditCount || 0), 0);
+  const configuredCount = providers.filter((provider) => provider.configured).length;
+  const selectedProviderKey = elements.manualPaymentForm?.elements?.provider?.value;
+  const selectedReportKey = selectedProviderKey === "propelr" ? "propelrpay" : selectedProviderKey;
+  const selectedProvider = providers.find((provider) => provider.key === selectedReportKey || provider.provider === selectedReportKey);
+
+  elements.cardPaymentReportList.innerHTML = `
+    <article class="list-card gateway-report-summary">
+      <div class="summary-grid provider-report-summary">
+        <div><span>Providers</span><strong>${escapeHtml(configuredCount)} / ${escapeHtml(providers.length)}</strong></div>
+        <div><span>Transactions</span><strong>${escapeHtml(totalTransactions)}</strong></div>
+        <div><span>Audit Logs</span><strong>${escapeHtml(totalAuditLogs)}</strong></div>
+      </div>
+    </article>
+    ${selectedProvider ? `
+      <article class="list-card gateway-report-summary">
+        <div class="provider-report-top">
+          <div>
+            <strong>${escapeHtml(selectedProvider.label)}</strong>
+            <div>${escapeHtml(selectedProvider.capabilities?.join(", ") || "-")}</div>
+          </div>
+          <span class="status-pill ${selectedProvider.configured ? "status-good" : "status-bad"}">${selectedProvider.configured ? "configured" : "missing config"}</span>
+        </div>
+        ${renderKeyValueDetails({
+          "Missing": formatMissingConfig(selectedProvider.missing),
+          "Transactions": selectedProvider.transactionCount || 0,
+          "Audit Logs": selectedProvider.auditCount || 0
+        })}
+      </article>
+    ` : ""}
+  `;
+}
+
+function applyPaymentProcessorRouteFilter() {
+  const processor = getPaymentProcessorRouteKey();
+  const select = elements.paymentProcessorFilterForm?.elements?.processor;
+  if (processor && select && select.value !== processor) {
+    select.value = processor;
+  }
+}
+
+function getPaymentProcessorFilters() {
+  const form = elements.paymentProcessorFilterForm;
+  const payload = removeEmptyFields(form ? formToObject(form) : {});
+  const routeProcessor = getPaymentProcessorRouteKey();
+  if (routeProcessor && !payload.processor) {
+    payload.processor = routeProcessor;
+  }
+  ["amountMin"].forEach((key) => {
+    if (payload[key]) {
+      payload[key] = String(payload[key]).replace(/,/g, "");
+    }
+  });
+  return payload;
+}
+
+function getPaymentProcessorQueryString() {
+  const filters = getPaymentProcessorFilters();
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, value);
+    }
+  });
+  return params.toString();
+}
+
+function renderPaymentProcessorOptions() {
+  const data = state.paymentProcessorLogs || {};
+  const processors = data.processors || [];
+  const form = elements.paymentProcessorFilterForm;
+  const processorSelect = form?.elements?.processor;
+  if (!form) {
+    return;
+  }
+  const previousProcessor = processorSelect?.value || getPaymentProcessorRouteKey();
+  if (processorSelect && processors.length) {
+    processorSelect.innerHTML = `<option value="">All</option>` + processors.map((processor) => `
+    <option value="${escapeHtml(processor.key)}">${escapeHtml(processor.label || processor.key)}</option>
+  `).join("");
+    if (processors.some((processor) => processor.key === previousProcessor)) {
+      processorSelect.value = previousProcessor;
+    }
+  }
+
+  const renderSelectOptions = (select, values, previous) => {
+    if (!select) return;
+    const uniqueValues = [...new Set(values.filter(Boolean))].sort();
+    select.innerHTML = `<option value="">All</option>` + uniqueValues
+      .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+      .join("");
+    if (previous && uniqueValues.includes(previous)) {
+      select.value = previous;
+    }
+  };
+
+  renderSelectOptions(
+    form.elements.attemptType,
+    [...PROCESSOR_ATTEMPT_TYPES, ...(data.facets?.attemptTypes || [])],
+    data.filters?.attemptType || form.elements.attemptType?.value
+  );
+  renderSelectOptions(
+    form.elements.status,
+    [...PROCESSOR_STATUSES, ...(data.facets?.statuses || [])],
+    data.filters?.status || form.elements.status?.value
+  );
+
+  const userSelect = form.elements.createdByUserId;
+  if (userSelect) {
+    const previousUser = data.filters?.createdByUserId || userSelect.value;
+    const users = data.facets?.users || [];
+    userSelect.innerHTML = `<option value="">All</option>` + users.map((user) => `
+      <option value="${escapeHtml(user.id)}">${escapeHtml(user.displayName || user.username || user.id)}</option>
+    `).join("");
+    if (previousUser && users.some((user) => user.id === previousUser)) {
+      userSelect.value = previousUser;
+    }
+  }
+
+}
+
+function renderPaymentProcessorMenu() {
+  if (!elements.paymentProcessorMenu) {
+    return;
+  }
+  const processors = state.paymentProcessorLogs?.processors || [];
+  const selected = elements.paymentProcessorFilterForm?.elements?.processor?.value || getPaymentProcessorRouteKey();
+  elements.paymentProcessorMenu.innerHTML = processors.length
+    ? processors.map((processor) => `
+      <a href="#/payment-processors/${encodeURIComponent(processor.key)}" class="${processor.key === selected ? "active" : ""}">
+        <span class="processor-health-dot ${getProcessorHealthClass(processor.health)}" data-processor-health="${escapeHtml(processor.key)}"></span>
+        <strong>${escapeHtml(processor.label || processor.key)}</strong>
+        <span class="status-pill ${getProcessorHealthPillClass(processor.health, processor.configured)}">${escapeHtml(getProcessorHealthLabel(processor.health, processor.configured))}</span>
+      </a>
+    `).join("")
+    : `<article class="list-card">Processor list loading.</article>`;
+  renderProcessorHealthDots();
+}
+
+function getProcessorHealth(keyOrProcessor) {
+  const key = typeof keyOrProcessor === "string" ? keyOrProcessor : keyOrProcessor?.key;
+  if (!key) {
+    return null;
+  }
+  return state.paymentProcessorHealth?.processors?.[key] ||
+    state.paymentProcessorLogs?.health?.processors?.[key] ||
+    keyOrProcessor?.health ||
+    null;
+}
+
+function getProcessorHealthClass(health) {
+  if (!health) {
+    return "unknown";
+  }
+  if (health.status === "healthy" || health.healthy === true) {
+    return "healthy";
+  }
+  if (health.status === "checking") {
+    return "checking";
+  }
+  if (health.status === "unhealthy" || health.healthy === false) {
+    return "unhealthy";
+  }
+  return "unknown";
+}
+
+function getProcessorHealthLabel(health, configured) {
+  if (health?.status === "healthy" || health?.healthy === true) {
+    return "healthy";
+  }
+  if (health?.status === "checking") {
+    return "checking";
+  }
+  if (health?.status === "unhealthy" || health?.healthy === false) {
+    return health?.message || "unhealthy";
+  }
+  return configured ? "not checked" : "missing";
+}
+
+function getProcessorHealthPillClass(health, configured) {
+  if (health?.status === "healthy" || health?.healthy === true) {
+    return "status-good";
+  }
+  if (health?.status === "checking") {
+    return "status-warn";
+  }
+  if (health?.status === "unhealthy" || health?.healthy === false || !configured) {
+    return "status-bad";
+  }
+  return "status-warn";
+}
+
+function renderProcessorHealthDots() {
+  document.querySelectorAll("[data-processor-health]").forEach((dot) => {
+    const health = getProcessorHealth(dot.dataset.processorHealth);
+    dot.classList.remove("healthy", "unhealthy", "checking", "unknown");
+    dot.classList.add(getProcessorHealthClass(health));
+    const label = getProcessorHealthLabel(health, true);
+    dot.title = label;
+    dot.setAttribute("aria-label", label);
+  });
+}
+
+function renderPaymentProcessorSummary() {
+  if (!elements.paymentProcessorSummary) {
+    return;
+  }
+  const data = state.paymentProcessorLogs || {};
+  const filters = data.filters || {};
+  elements.paymentProcessorSummary.innerHTML = `
+    <div><span>Processor</span><strong>${escapeHtml(filters.processor || "all")}</strong></div>
+    <div><span>İşlem Tipi</span><strong>${escapeHtml(filters.attemptType || "all")}</strong></div>
+    <div><span>Result</span><strong>${escapeHtml(filters.status || "all")}</strong></div>
+    <div><span>Kayıt</span><strong>${escapeHtml(data.count || 0)}</strong></div>
+  `;
+}
+
+function formatMoneyForDisplay(value) {
+  if (value === undefined || value === null || value === "") {
+    return "-";
+  }
+  const amount = Number(String(value).replace(/,/g, ""));
+  if (!Number.isFinite(amount)) {
+    return String(value);
+  }
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount);
+}
+
+function formatMoneyInputValue(value) {
+  const raw = String(value || "").replace(/[^\d.]/g, "");
+  if (!raw) return "";
+  const [whole, ...rest] = raw.split(".");
+  const decimal = rest.join("").slice(0, 2);
+  const formattedWhole = whole ? Number(whole).toLocaleString("en-US") : "";
+  return rest.length ? `${formattedWhole}.${decimal}` : formattedWhole;
+}
+
+function formatProcessorMoneyInput(input) {
+  const cursorAtEnd = input.selectionStart === input.value.length;
+  input.value = formatMoneyInputValue(input.value);
+  if (cursorAtEnd) {
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+function openJsonModal(title, payload) {
+  openModal({
+    eyebrow: "JSON Debug",
+    title,
+    body: `<pre class="json-modal-pre">${escapeHtml(JSON.stringify(payload || {}, null, 2))}</pre>`
+  });
+}
+
+function hasJsonModelValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+  return true;
+}
+
+function renderPaymentProcessorLog(log) {
+  const canViewJsonModels = state.paymentProcessorLogs?.canViewJsonModels === true && state.user?.role === "admin";
+  const requestId = `request-${log.id || `${log.processor}-${log.created_at}`}`;
+  const responseId = `response-${log.id || `${log.processor}-${log.created_at}`}`;
+  if (canViewJsonModels) {
+    state.paymentProcessorJsonModels[requestId] = log.requestModel || {};
+    state.paymentProcessorJsonModels[responseId] = log.responseModel || {};
+  }
+  const hasRequest = canViewJsonModels && hasJsonModelValue(log.requestModel);
+  const hasResponse = canViewJsonModels && hasJsonModelValue(log.responseModel);
+  return `
+    <tr>
+      <td>
+        <strong>${escapeHtml(log.attempt_type || "-")}</strong>
+        <div class="muted">${escapeHtml(log.processor || log.provider || "-")}</div>
+      </td>
+      <td>${escapeHtml(formatMoneyForDisplay(log.amount))}</td>
+      <td>${escapeHtml(log.card?.maskedPan || "-")}</td>
+      <td>${escapeHtml(log.actor?.displayName || log.actor?.username || log.created_by_user_id || "-")}</td>
+      <td><span class="status-pill ${statusClass(log.status)}">${escapeHtml(log.status || "-")}</span></td>
+      ${canViewJsonModels ? `
+      <td class="processor-table-action">
+        <button type="button" class="ghost small" data-json-modal="${escapeHtml(requestId)}" data-json-title="Request JSON" ${hasRequest ? "" : "disabled"}>Request</button>
+      </td>
+      <td class="processor-table-action">
+        <button type="button" class="ghost small" data-json-modal="${escapeHtml(responseId)}" data-json-title="Response JSON" ${hasResponse ? "" : "disabled"}>Response</button>
+      </td>
+      ` : ""}
+    </tr>
+  `;
+}
+
+function renderPaymentProcessorLogs() {
+  renderPaymentProcessorOptions();
+  renderPaymentProcessorMenu();
+  renderPaymentProcessorSummary();
+  if (!elements.paymentProcessorLogsList) {
+    return;
+  }
+  const logs = state.paymentProcessorLogs?.logs || [];
+  const canViewJsonModels = state.paymentProcessorLogs?.canViewJsonModels === true && state.user?.role === "admin";
+  state.paymentProcessorJsonModels = {};
+  elements.paymentProcessorLogsList.innerHTML = logs.length
+    ? `
+      <table class="processor-table">
+        <colgroup>
+          <col>
+          <col>
+          <col>
+          <col>
+          <col>
+          ${canViewJsonModels ? `
+          <col class="processor-action-col">
+          <col class="processor-action-col">
+          ` : ""}
+        </colgroup>
+        <thead>
+          <tr>
+            <th>İşlem</th>
+            <th>Miktar</th>
+            <th>Kart</th>
+            <th>İşlemi Yapan</th>
+            <th>Status</th>
+            ${canViewJsonModels ? `
+            <th>Request</th>
+            <th>Response</th>
+            ` : ""}
+          </tr>
+        </thead>
+        <tbody>${logs.map(renderPaymentProcessorLog).join("")}</tbody>
+      </table>
+    `
+    : `<article class="list-card">Bu filtrelerle işlem logu yok.</article>`;
+}
+
+function renderBurpStatus() {
+  if (!elements.burpStatus) {
+    return;
+  }
+  const status = state.burpSuite.status || {};
+  elements.burpStatus.innerHTML = `
+    <article class="list-card pretty-message ${status.active ? "status-good" : "status-warn"}">
+      <div class="pretty-message-head">
+        <strong>${status.active ? "Burp Active" : "Burp Stopped"}</strong>
+        <span class="status-pill ${status.otpCaptureArmed ? "status-warn" : status.active ? "status-good" : "status-bad"}">${status.otpCaptureArmed ? "OTP armed" : status.active ? "running" : "stopped"}</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Proxy": status.proxyEnabled ? status.proxyUrl : "off",
+        "Scope": Array.isArray(status.scopeHosts) && status.scopeHosts.length ? status.scopeHosts.join(", ") : "-",
+        "Pending": status.pendingResponses || 0,
+        "Hold": status.holdSeconds ? `${status.holdSeconds}s` : "-",
+        "Keyword": status.otpPathKeyword || "-"
+      })}
+    </article>
+  `;
+}
+
+function renderBurpTraffic() {
+  if (!elements.burpTrafficList) {
+    return;
+  }
+  const events = state.burpSuite.events || [];
+  elements.burpTrafficList.innerHTML = events.length ? events.map((event) => `
+    <article class="list-card burp-event ${event.type === "otp-captured" ? "burp-event-pending" : ""}">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(event.type || "event")}</strong>
+        <span class="status-pill ${statusClass(event.status)}">${escapeHtml(event.status || "-")}</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Method": event.request?.method,
+        "Host": event.request?.host,
+        "Path": event.request?.path,
+        "Created": event.createdAt
+      })}
+      <details>
+        <summary>Request / response</summary>
+        <pre>${escapeHtml(JSON.stringify({
+          request: event.request,
+          response: event.response
+        }, null, 2))}</pre>
+      </details>
+    </article>
+  `).join("") : `<article class="list-card">No traffic captured yet.</article>`;
+}
+
+function renderBurpPending() {
+  if (!elements.burpPendingList || !elements.burpReleaseForm) {
+    return;
+  }
+  const pending = state.burpSuite.pending || [];
+  elements.burpPendingList.innerHTML = pending.length ? pending.map((item) => `
+    <article class="list-card burp-pending-card">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(item.request?.method || "-")} ${escapeHtml(item.request?.path || "-")}</strong>
+        <button type="button" class="ghost small" data-burp-pending-id="${escapeHtml(item.id)}">Edit Response</button>
+      </div>
+      ${renderKeyValueDetails({
+        "Host": item.request?.host,
+        "Status": item.response?.status,
+        "Expires": item.expiresAt
+      })}
+    </article>
+  `).join("") : `<article class="list-card">No pending response.</article>`;
+
+  if (!pending.some((item) => item.id === state.burpSuite.selectedPendingId)) {
+    state.burpSuite.selectedPendingId = null;
+    elements.burpReleaseForm.hidden = true;
+  }
+}
+
+function renderBurpOtpMessages() {
+  if (!elements.burpOtpSendResult) {
+    return;
+  }
+
+  const messages = state.burpSuite.otpMessages || [];
+  elements.burpOtpSendResult.innerHTML = messages.length ? messages.slice(0, 5).map((item) => `
+    <article class="list-card">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(item.channel || "otp")} · ${escapeHtml(item.recipient || "-")}</strong>
+        <span class="status-pill status-good">received</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Purpose": item.purpose,
+        "Created": item.createdAt,
+        "Expires": item.expiresAt
+      })}
+      <details>
+        <summary>Inbox payload</summary>
+        <pre>${escapeHtml(JSON.stringify(item.body || item, null, 2))}</pre>
+      </details>
+    </article>
+  `).join("") : `<article class="list-card">No local OTP messages yet.</article>`;
+}
+
+function renderBurpSuite() {
+  renderBurpStatus();
+  renderBurpTraffic();
+  renderBurpPending();
+  renderBurpOtpMessages();
+}
+
+function renderCloverLearningRun(result) {
+  if (!elements.cloverLearningResult) {
+    return;
+  }
+
+  const output = result?.output || {};
+  const validCards = output.validCards || output.cards || [];
+  const attempts = output.attempts || [];
+
+  elements.cloverLearningResult.innerHTML = `
+    <article class="list-card pretty-message ${statusClass(result?.status || (result?.ok ? "completed" : "partial"))}">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(result?.message || "Machine learning run completed")}</strong>
+        <span class="status-pill ${statusClass(result?.status || "-")}">${escapeHtml(result?.status || "-")}</span>
+      </div>
+      <div class="summary-grid">
+        <div><span>Requested</span><strong>${escapeHtml(output.requestedCount ?? result?.input?.quantity ?? "-")}</strong></div>
+        <div><span>Valid</span><strong>${escapeHtml(output.validCount ?? validCards.length)}</strong></div>
+        <div><span>Invalid</span><strong>${escapeHtml(output.invalidCount ?? "-")}</strong></div>
+        <div><span>Total Attempts</span><strong>${escapeHtml(output.totalAttempts ?? attempts.length)}</strong></div>
+        <div><span>BIN</span><strong>${escapeHtml(result?.input?.bin || "-")}</strong></div>
+        <div><span>Mode</span><strong>${escapeHtml(result?.mode || "-")}</strong></div>
+      </div>
+    </article>
+    <section class="history-tabs">
+      <section>
+        <h4>Valid Results</h4>
+        ${validCards.length ? validCards.map((card, index) => `
+          <article class="list-card">
+            <div class="pretty-message-head">
+              <strong>#${index + 1} ${escapeHtml(card.maskedPan || "-")}</strong>
+              <span class="status-pill status-good">valid</span>
+            </div>
+            ${renderKeyValueDetails({
+              "First6": card.first6,
+              "Last4": card.last4,
+              "Expiry": card.expiry || `${card.expMonth || "--"}/${card.expYear || "--"}`,
+              "CVV Length": card.cvvLength,
+              "Verified": card.verifiedAt,
+              "Tokenized": card.tokenized ? "yes" : "no"
+            })}
+          </article>
+        `).join("") : `<article class="list-card">No valid result for this run.</article>`}
+      </section>
+      <section>
+        <h4>Attempts</h4>
+        ${attempts.length ? attempts.slice(0, 80).map((attempt) => `
+          <article class="list-card">
+            <div class="pretty-message-head">
+              <strong>Attempt ${escapeHtml(attempt.attempt || "-")} · ${escapeHtml(attempt.card?.maskedPan || "-")}</strong>
+              <span class="status-pill ${statusClass(attempt.status)}">${escapeHtml(attempt.status || "-")}</span>
+            </div>
+            ${renderKeyValueDetails({
+              "Error": attempt.errorCode,
+              "Provider": attempt.providerStatus,
+              "Message": attempt.providerMessage,
+              "Checked": attempt.checkedAt
+            })}
+          </article>
+        `).join("") : `<article class="list-card">No attempts recorded.</article>`}
+      </section>
+    </section>
+    <details class="raw-details">
+      <summary>Raw result</summary>
+      <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function selectBurpPending(pendingId) {
+  const pending = (state.burpSuite.pending || []).find((item) => item.id === pendingId);
+  if (!pending || !elements.burpReleaseForm) {
+    return;
+  }
+
+  state.burpSuite.selectedPendingId = pending.id;
+  elements.burpReleaseForm.hidden = false;
+  elements.burpReleaseForm.elements.pendingId.value = pending.id;
+  elements.burpReleaseForm.elements.status.value = pending.response?.status || 200;
+  elements.burpReleaseForm.elements.headers.value = JSON.stringify(pending.response?.headers || {}, null, 2);
+  elements.burpReleaseForm.elements.body.value = JSON.stringify(pending.response?.body ?? {}, null, 2);
+  elements.burpReleaseForm.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderVoiceProviders() {
@@ -325,8 +1599,8 @@ function checksByStatus(cardId, type, statuses = []) {
 
 function statusClass(value) {
   const status = String(value || "").toLowerCase();
-  if (["approved", "verified", "passed", "success"].includes(status)) return "status-good";
-  if (["declined", "failed", "invalid"].includes(status)) return "status-bad";
+  if (["approved", "verified", "passed", "success", "captured", "recorded"].includes(status)) return "status-good";
+  if (["declined", "failed", "invalid", "error"].includes(status)) return "status-bad";
   return "status-warn";
 }
 
@@ -336,7 +1610,7 @@ function renderCardOptions() {
   }
 
   elements.cardOptions.innerHTML = state.cards.map((card) => `
-    <option value="${escapeHtml(card.id)}">${escapeHtml(formatCardDisplayNumber(card))} · ${escapeHtml(card.cardholder_name || "-")}</option>
+    <option value="${escapeHtml(card.id)}" label="${escapeHtml(formatSavedCardOptionLabel(card))}"></option>
   `).join("");
 
   document.querySelectorAll("[data-card-select]").forEach((select) => {
@@ -344,7 +1618,7 @@ function renderCardOptions() {
     select.innerHTML = `
       <option value="${MANUAL_CARD_VALUE}">Manual Card</option>
       ${state.cards.map((card) => `
-        <option value="${escapeHtml(card.id)}">${escapeHtml(formatCardDisplayNumber(card))} · ${escapeHtml(card.cardholder_name || "-")}</option>
+        <option value="${escapeHtml(card.id)}">${escapeHtml(formatSavedCardOptionLabel(card))}</option>
       `).join("")}
     `;
     select.value = state.cards.some((card) => card.id === selected) ? selected : MANUAL_CARD_VALUE;
@@ -357,6 +1631,43 @@ function formatCardDisplayNumber(card) {
     return `${card.first6}******${card.last4}`;
   }
   return card.masked_pan || card.id;
+}
+
+function formatCardExpiry(card) {
+  const month = card?.exp_month || card?.expMonth || "--";
+  const year = card?.exp_year || card?.expYear || "----";
+  return `${month}/${year}`;
+}
+
+function formatShortToken(value) {
+  const token = String(value || "");
+  if (!token) {
+    return "-";
+  }
+  if (token.length <= 14) {
+    return token;
+  }
+  return `${token.slice(0, 8)}...${token.slice(-4)}`;
+}
+
+function formatSavedCardOptionLabel(card) {
+  return [
+    formatCardDisplayNumber(card),
+    card.brand || "-",
+    formatCardExpiry(card),
+    card.cardholder_name || "-",
+    card.provider || "-"
+  ].filter(Boolean).join(" · ");
+}
+
+function getSavedCardSelectOptions() {
+  return [
+    { value: MANUAL_CARD_VALUE, label: "Manual Card" },
+    ...state.cards.map((card) => ({
+      value: card.id,
+      label: formatSavedCardOptionLabel(card)
+    }))
+  ];
 }
 
 function openModal({ eyebrow = "History", title = "Card History", body = "" }) {
@@ -388,9 +1699,11 @@ function renderCards() {
     const canViewEnrollment = can("canViewEnrollment") && card.is_enrolled;
     const binCheck = latestCheck(card.id, "bin_check");
     const liveCheck = latestCheck(card.id, "live_check");
+    const verifyCheck = latestCheck(card.id, "auth_check");
     const balanceCheck = latestCheck(card.id, "balance_check");
     const liveClass = liveCheck ? statusClass(liveCheck.status) : "status-warn";
     const binClass = binCheck ? statusClass(binCheck.status) : "status-warn";
+    const verifyClass = verifyCheck ? statusClass(verifyCheck.status) : "status-warn";
     const safeCardId = escapeHtml(card.id);
 
     row.innerHTML = `
@@ -400,6 +1713,7 @@ function renderCards() {
       <td>
         <span class="status-pill ${binClass}">BIN ${escapeHtml(binCheck?.status || "none")}</span>
         <span class="status-pill ${liveClass}">LIVE ${escapeHtml(liveCheck?.status || "none")}</span>
+        <span class="status-pill ${verifyClass}">VERIFY ${escapeHtml(verifyCheck?.status || "none")}</span>
       </td>
       <td>
         <div class="row-actions">
@@ -428,44 +1742,80 @@ function renderChecks() {
   }
 
   elements.checksList.innerHTML = items.length
-    ? items.map((item) => `
-      <article class="list-card">
-        <strong>${escapeHtml(item.attempt_type || "-")}</strong> · ${escapeHtml(item.status || "-")}
-        <div>${escapeHtml(item.provider || "-")} · ${escapeHtml(item.created_at || "-")}</div>
-        <div>Amount: ${escapeHtml(item.amount ?? "-")} ${escapeHtml(item.currency || "")}</div>
-        <div>Balance: ${escapeHtml(item.balance_amount ?? "-")}</div>
-        <pre>${escapeHtml(JSON.stringify(item.raw_response, null, 2))}</pre>
-      </article>
-    `).join("")
+    ? items.map(renderAttemptSummary).join("")
     : `<article class="list-card">No checks yet for this card.</article>`;
+}
+
+function attemptMessage(item) {
+  const raw = item.raw_response || {};
+  return raw.result?.responseMessage ||
+    raw.verification?.responseMessage ||
+    raw.binCheck?.status ||
+    raw.message ||
+    item.provider_reference_id ||
+    "-";
+}
+
+function renderAttemptSummary(item) {
+  return `
+    <article class="list-card">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(item.attempt_type || "-")}</strong>
+        <span class="status-pill ${statusClass(item.status)}">${escapeHtml(item.status || "-")}</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Provider": item.provider,
+        "Message": attemptMessage(item),
+        "Reference": item.provider_reference_id,
+        "Amount": item.amount,
+        "Currency": item.currency,
+        "Balance": item.balance_amount,
+        "Created": item.created_at,
+        "User": item.created_by_user_id
+      })}
+    </article>
+  `;
 }
 
 function renderCardHistory(cardId) {
   const card = state.cards.find((item) => item.id === cardId);
   const checks = checksForCard(cardId);
   const logs = state.auditLogs.filter((log) => log.entity_type === "card" && log.entity_id === cardId);
+  const checkItems = checks.filter((item) => ["bin_check", "live_check", "balance_check", "auth_check", "iframe_verify"].includes(item.attempt_type));
+  const processItems = checks.filter((item) => !["bin_check", "live_check", "balance_check", "auth_check", "iframe_verify"].includes(item.attempt_type));
   const body = `
     <article class="list-card">
       <strong>${escapeHtml(card?.masked_pan || cardId)}</strong>
       <div>${escapeHtml(card?.cardholder_name || "-")} · ${escapeHtml(card?.provider || "-")}</div>
     </article>
-    ${checks.length ? checks.map((item) => `
-      <article class="list-card">
-        <strong>${escapeHtml(item.attempt_type)}</strong> · <span class="status-pill ${statusClass(item.status)}">${escapeHtml(item.status)}</span>
-        <div>${escapeHtml(item.provider)} · ${escapeHtml(item.created_at)}</div>
-        <div>Amount: ${escapeHtml(item.amount ?? "-")} ${escapeHtml(item.currency || "")}</div>
-        <div>Balance: ${escapeHtml(item.balance_amount ?? "-")}</div>
-        <div>User: ${escapeHtml(item.created_by_user_id || "-")}</div>
-        <pre>${escapeHtml(JSON.stringify(item.raw_response, null, 2))}</pre>
-      </article>
-    `).join("") : `<article class="list-card">No card checks yet.</article>`}
-    ${can("canManageUsers") && logs.length ? logs.map((log) => `
-      <article class="list-card">
-        <strong>${escapeHtml(log.action)}</strong> · <span class="status-pill ${statusClass(log.status)}">${escapeHtml(log.status)}</span>
-        <div>${escapeHtml(log.created_at)} · Actor: ${escapeHtml(log.actor_user_id || "-")}</div>
-        <pre>${escapeHtml(JSON.stringify(log.details, null, 2))}</pre>
-      </article>
-    `).join("") : ""}
+    <div class="history-tabs">
+      <section>
+        <h4>Check List</h4>
+        ${checkItems.length ? checkItems.map(renderAttemptSummary).join("") : `<article class="list-card">No check records yet.</article>`}
+      </section>
+      <section>
+        <h4>Process List</h4>
+        ${processItems.length ? processItems.map(renderAttemptSummary).join("") : `<article class="list-card">No process records yet.</article>`}
+      </section>
+      ${can("canManageUsers") ? `
+        <section>
+          <h4>Logs</h4>
+          ${logs.length ? logs.map((log) => `
+            <article class="list-card">
+              <div class="pretty-message-head">
+                <strong>${escapeHtml(log.action)}</strong>
+                <span class="status-pill ${statusClass(log.status)}">${escapeHtml(log.status)}</span>
+              </div>
+              ${renderKeyValueDetails({
+                "Entity": log.entity_type,
+                "Created": log.created_at,
+                "Actor": log.actor_user_id
+              })}
+            </article>
+          `).join("") : `<article class="list-card">No logs yet.</article>`}
+        </section>
+      ` : ""}
+    </div>
   `;
 
   openModal({
@@ -528,6 +1878,12 @@ function setFormValue(form, name, value) {
   }
 }
 
+function assignFormValue(form, name, value = "") {
+  if (form?.elements?.[name]) {
+    form.elements[name].value = value == null ? "" : value;
+  }
+}
+
 function getCardById(cardId) {
   return state.cards.find((card) => card.id === cardId) || null;
 }
@@ -541,9 +1897,85 @@ function syncCardSelect(select) {
   const card = getCardById(select.value);
   if (manualFields) {
     manualFields.hidden = Boolean(card);
+    if (!card) {
+      clearManualFields(manualFields);
+      assignFormValue(select.form, "source", "");
+    }
   }
+  renderCardSummary(select, card);
+  if (card && select.form) {
+    fillTransactionFormFromCard(select.form, card);
+  }
+}
+
+function clearManualFields(container) {
+  container.querySelectorAll("input, select, textarea").forEach((field) => {
+    if (field.name === "billingCountry") {
+      field.value = "US";
+      return;
+    }
+    field.value = "";
+  });
+}
+
+function renderCardSummary(select, card) {
+  const target = document.getElementById(select.dataset.summaryTarget || "");
+  if (!target) {
+    return;
+  }
+
+  if (!card) {
+    target.innerHTML = `
+      <div class="summary-empty">Manual card entry</div>
+    `;
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="summary-grid">
+      <div><span>Card</span><strong>${escapeHtml(formatCardDisplayNumber(card))}</strong></div>
+      <div><span>Holder</span><strong>${escapeHtml(card.cardholder_name || "-")}</strong></div>
+      <div><span>Expiry</span><strong>${escapeHtml(card.exp_month || "--")}/${escapeHtml(card.exp_year || "----")}</strong></div>
+      <div><span>Brand</span><strong>${escapeHtml(card.brand || "-")}</strong></div>
+      <div><span>ZIP</span><strong>${escapeHtml(card.billing_zip || "-")}</strong></div>
+      <div><span>Status</span><strong>${escapeHtml(card.verification_status || "pending")}</strong></div>
+    </div>
+  `;
+}
+
+function renderManualPaymentSummary(card) {
+  if (!elements.manualPaymentCardSummary) {
+    return;
+  }
+  const hasCardSearch = Boolean(elements.manualPaymentForm?.elements?.cardId);
+  elements.manualPaymentCardSummary.hidden = !hasCardSearch;
+  if (!hasCardSearch) {
+    elements.manualPaymentCardSummary.innerHTML = "";
+    return;
+  }
+  if (!card) {
+    elements.manualPaymentCardSummary.innerHTML = `<div class="summary-empty">Manual card entry</div>`;
+    return;
+  }
+  elements.manualPaymentCardSummary.innerHTML = `
+    <div class="summary-grid">
+      <div><span>Card</span><strong>${escapeHtml(formatCardDisplayNumber(card))}</strong></div>
+      <div><span>Provider</span><strong>${escapeHtml(card.provider || "-")}</strong></div>
+      <div><span>Token</span><strong>${escapeHtml(formatShortToken(card.provider_payment_token))}</strong></div>
+      <div><span>Holder</span><strong>${escapeHtml(card.cardholder_name || "-")}</strong></div>
+      <div><span>Expiry</span><strong>${escapeHtml(formatCardExpiry(card))}</strong></div>
+      <div><span>Brand</span><strong>${escapeHtml(card.brand || "-")}</strong></div>
+      <div><span>Status</span><strong>${escapeHtml(card.verification_status || "pending")}</strong></div>
+    </div>
+  `;
+}
+
+function syncManualPaymentCardSearch() {
+  const cardId = elements.manualPaymentForm?.elements?.cardId?.value;
+  const card = getCardById(cardId);
+  renderManualPaymentSummary(card);
   if (card) {
-    fillCardDrivenForms(card);
+    fillTransactionFormFromCard(elements.manualPaymentForm, card);
   }
 }
 
@@ -558,6 +1990,8 @@ function applySelectedCardPayload(form, payload, { includeBilling = true } = {})
   payload.expMonth = card.exp_month;
   payload.expYear = card.exp_year;
   payload.cardholderName = card.cardholder_name;
+  payload.source = payload.source || card.provider_payment_token;
+  payload.providerPaymentToken = card.provider_payment_token;
   payload.first6 = card.first6;
   payload.last4 = card.last4;
 
@@ -578,10 +2012,15 @@ function applySelectedCardPayload(form, payload, { includeBilling = true } = {})
 function fillCardDrivenForms(card) {
   const forms = [
     elements.providerVerificationForm,
+    elements.manualPaymentForm,
+    elements.cloverVerifyForm,
+    elements.providerOperationForm,
     elements.paypalBinCheckForm,
     elements.paypalLiveCheckForm,
+    elements.paypalSaleForm,
     elements.paypalAuthForm,
-    elements.paypalCaptureForm
+    elements.paypalCaptureForm,
+    elements.paypalVoidForm
   ];
 
   forms.forEach((form) => {
@@ -591,25 +2030,36 @@ function fillCardDrivenForms(card) {
     if (manualFields) {
       manualFields.hidden = true;
     }
+    if (select) {
+      renderCardSummary(select, card);
+    }
+    fillTransactionFormFromCard(form, card);
   });
   setFormValue(elements.paypalBinCheckForm, "bin", card.first6);
   setFormValue(elements.paypalLiveCheckForm, "pan", card.pan);
-  setFormValue(elements.paypalAuthForm, "pan", card.pan);
+  setFormValue(elements.cloverVerifyForm, "source", card.provider_payment_token);
+  setFormValue(elements.cloverVerifyForm, "bin", card.first6);
+}
 
-  [elements.paypalLiveCheckForm, elements.paypalAuthForm].forEach((form) => {
-    setFormValue(form, "expMonth", card.exp_month);
-    setFormValue(form, "expYear", card.exp_year);
-    setFormValue(form, "cardholderName", card.cardholder_name);
-  });
-
+function fillTransactionFormFromCard(form, card) {
+  if (!form || !card) {
+    return;
+  }
   const nameParts = String(card.cardholder_name || "").trim().split(/\s+/).filter(Boolean);
-  setFormValue(elements.paypalAuthForm, "firstName", nameParts[0]);
-  setFormValue(elements.paypalAuthForm, "lastName", nameParts.slice(1).join(" "));
-  setFormValue(elements.paypalAuthForm, "street", card.billing_address_line1);
-  setFormValue(elements.paypalAuthForm, "city", card.billing_city);
-  setFormValue(elements.paypalAuthForm, "state", card.billing_state);
-  setFormValue(elements.paypalAuthForm, "billingZip", card.billing_zip);
-  setFormValue(elements.paypalAuthForm, "billingCountry", card.billing_country);
+  assignFormValue(form, "pan", card.pan);
+  assignFormValue(form, "expMonth", card.exp_month);
+  assignFormValue(form, "expYear", card.exp_year);
+  assignFormValue(form, "expiry", `${String(card.exp_month || "").padStart(2, "0")}${String(card.exp_year || "").slice(-2)}`);
+  assignFormValue(form, "cardholderName", card.cardholder_name);
+  assignFormValue(form, "source", card.provider_payment_token);
+  assignFormValue(form, "bin", card.first6);
+  assignFormValue(form, "firstName", nameParts[0]);
+  assignFormValue(form, "lastName", nameParts.slice(1).join(" "));
+  assignFormValue(form, "street", card.billing_address_line1);
+  assignFormValue(form, "city", card.billing_city);
+  assignFormValue(form, "state", card.billing_state);
+  assignFormValue(form, "billingZip", card.billing_zip);
+  assignFormValue(form, "billingCountry", card.billing_country || "US");
 }
 
 function renderUsers() {
@@ -635,13 +2085,63 @@ function renderAuditLogs() {
   elements.auditLogsList.innerHTML = state.auditLogs.length
     ? state.auditLogs.map((log) => `
       <article class="list-card">
-        <strong>${escapeHtml(log.action)}</strong> · ${escapeHtml(log.status)}
-        <div>${escapeHtml(log.entity_type)} · ${escapeHtml(log.entity_id || "-")}</div>
-        <div>${escapeHtml(log.created_at)}</div>
-        <pre>${escapeHtml(JSON.stringify(log.details, null, 2))}</pre>
+        <div class="pretty-message-head">
+          <strong>${escapeHtml(log.action)}</strong>
+          <span class="status-pill ${statusClass(log.status)}">${escapeHtml(log.status)}</span>
+        </div>
+        ${renderKeyValueDetails({
+          "Entity": log.entity_type,
+          "Entity Id": log.entity_id,
+          "Created": log.created_at,
+          "Actor": log.actor_user_id
+        })}
       </article>
     `).join("")
     : `<article class="list-card">No audit logs found.</article>`;
+}
+
+function renderUnchargebackCases() {
+  if (!elements.unchargebackList) {
+    return;
+  }
+
+  elements.unchargebackList.innerHTML = state.unchargebackCases.length
+    ? state.unchargebackCases.map((item) => `
+      <article class="list-card unchargeback-item">
+        <div class="unchargeback-main">
+          <div>
+            <strong>${escapeHtml(item.owner_name || "-")}</strong>
+            <div>Number: ${escapeHtml(item.owner_number || "-")}</div>
+            <div>Price: ${escapeHtml(formatMoney(item.content_price))}</div>
+            <div>Case: ${escapeHtml(item.case_id || "-")} · Tx: ${escapeHtml(item.transaction_id || "-")}</div>
+          </div>
+          <div class="unchargeback-actions">
+            <button type="button" class="${item.widget_embed_html ? "ghost" : "danger"}" data-unchargeback-action="widget" data-case-id="${escapeHtml(item.id)}">
+              Tip Widget
+            </button>
+            <button type="button" class="${item.content_embed_html ? "ghost" : "danger"}" data-unchargeback-action="content" data-case-id="${escapeHtml(item.id)}">
+              Content
+            </button>
+          </div>
+        </div>
+        <div class="unchargeback-preview">
+          <span>Preview</span>
+          ${item.widget_embed_html ? item.widget_embed_html : `<div class="preview-empty">No widget</div>`}
+        </div>
+      </article>
+    `).join("")
+    : `<article class="list-card">No unchargeback cases yet.</article>`;
+}
+
+function formatMoney(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "-";
+  }
+  return numeric.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD"
+  });
 }
 
 function renderValidationResult(result) {
@@ -716,28 +2216,361 @@ function renderProviderVerificationResult(result) {
 }
 
 function renderGenericProviderResult(target, title, payload) {
+  if (!target) {
+    return;
+  }
+  const status = payload?.status || payload?.result?.status || (payload?.success === true || payload?.ok === true ? "success" : payload?.success === false || payload?.ok === false ? "failed" : (/error/i.test(title) ? "failed" : "success"));
+  const message = payload?.failureReason || payload?.responseMessage || payload?.result?.responseMessage || payload?.message || payload?.error || payload?.verificationStatus || "İşlem tamamlandı";
+  const details = {
+    "Operation Id": payload?.operationId,
+    "HTTP Status": payload?.httpStatus,
+    "Status": status,
+    "Result Code": payload?.resultCode || payload?.result?.resultCode,
+    "Failure Reason": payload?.failureReason,
+    "Transaction Id": payload?.transactionId || payload?.result?.transactionId || payload?.cloverChargeId,
+    "Reference": payload?.correlationId || payload?.reference,
+    "Amount": payload?.amount || payload?.result?.amount,
+    "Currency": payload?.currency || payload?.result?.currency
+  };
+
   target.innerHTML = `
-    <article class="list-card">
-      <strong>${escapeHtml(title)}</strong>
-      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    <article class="list-card pretty-message ${statusClass(status)}">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span class="status-pill ${statusClass(status)}">${escapeHtml(status || "-")}</span>
+      </div>
+      <p>${escapeHtml(message)}</p>
+      ${renderKeyValueDetails(details)}
+      <details class="raw-details">
+        <summary>Raw response</summary>
+        <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+      </details>
     </article>
   `;
 }
 
-function renderBinCheckResult(result) {
+function renderKeyValueDetails(items = {}) {
+  return Object.entries(items).map(([label, value]) => `
+    <div class="kv-row">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "-")}</strong>
+    </div>
+  `).join("");
+}
+
+function renderBinCheckResult(result, target = elements.paypalBinCheckResult) {
   const details = result?.details || {};
-  elements.paypalBinCheckResult.innerHTML = `
+  const ipDetails = result?.ipDetails || null;
+
+  target.innerHTML = `
     <article class="list-card bin-result">
       <strong>BIN/IIN Result</strong>
-      ${Object.entries(details).map(([label, value]) => `
-        <div class="kv-row">
-          <span>${escapeHtml(label)}</span>
-          <strong>${escapeHtml(value || "-")}</strong>
-        </div>
-      `).join("")}
-      <pre>${escapeHtml(JSON.stringify({ status: result.status, source: result.source }, null, 2))}</pre>
+      ${renderKeyValueDetails(details)}
+      ${ipDetails ? `
+        <strong class="result-subtitle">IP Check</strong>
+        ${renderKeyValueDetails(ipDetails)}
+      ` : ""}
+      <pre>${escapeHtml(JSON.stringify({ status: result.status, bin: result.bin, ip: result.ip, source: result.source }, null, 2))}</pre>
     </article>
   `;
+}
+
+function renderCloverVerifyResult(result) {
+  const card = result?.card || {};
+  const verification = result?.verification || {};
+  const binCheck = result?.binCheck || {};
+  const fraudChecks = verification.fraudChecks || {};
+  const binDetails = binCheck.details || {};
+  const ipDetails = binCheck.ipDetails || null;
+
+  elements.cloverVerifyResult.innerHTML = `
+    <article class="list-card">
+      <strong>Card Snapshot</strong>
+      ${renderKeyValueDetails({
+        "Mode": card.mode,
+        "Card": card.maskedPan,
+        "BIN": card.first6,
+        "Last4": card.last4,
+        "Holder": card.cardholderName,
+        "Expiry": card.expMonth && card.expYear ? `${card.expMonth}/${card.expYear}` : null,
+        "Source Token": card.sourceToken
+      })}
+    </article>
+    <article class="list-card">
+      <strong>Clover Verification</strong>
+      <div>Status: <span class="status-pill ${statusClass(verification.status)}">${escapeHtml(verification.status || "-")}</span></div>
+      <div>Mode: ${escapeHtml(verification.verificationMode || "-")}</div>
+      <div>Preauth submitted: ${verification.submittedToClover ? "yes" : "no"}</div>
+      ${verification.cloverChargeId ? `<div>Charge: ${escapeHtml(verification.cloverChargeId)}</div>` : ""}
+      ${verification.amount ? `<div>Amount: ${escapeHtml(verification.amount)} ${escapeHtml(verification.currency || "")}</div>` : ""}
+      ${renderKeyValueDetails({
+        "CVC Check": fraudChecks.cvcCheck,
+        "Address Check": fraudChecks.addressLine1Check,
+        "ZIP Check": fraudChecks.addressZipCheck
+      })}
+      ${verification.message ? `<div>${escapeHtml(verification.message)}</div>` : ""}
+      ${verification.error ? `<pre>${escapeHtml(JSON.stringify({ error: verification.error }, null, 2))}</pre>` : ""}
+    </article>
+    <article class="list-card bin-result">
+      <strong>BIN/IIN Result</strong>
+      <div>Status: <span class="status-pill ${statusClass(binCheck.status)}">${escapeHtml(binCheck.status || "-")}</span></div>
+      ${renderKeyValueDetails(binDetails)}
+      ${ipDetails ? `
+        <strong class="result-subtitle">IP Check</strong>
+        ${renderKeyValueDetails(ipDetails)}
+      ` : ""}
+      <pre>${escapeHtml(JSON.stringify({
+        status: binCheck.status,
+        bin: binCheck.bin,
+        ip: binCheck.ip,
+        source: binCheck.source,
+        error: binCheck.error || undefined
+      }, null, 2))}</pre>
+    </article>
+  `;
+}
+
+function renderProviderOperationResult(result, target = elements.providerOperationResult) {
+  const card = result?.card || {};
+  const persistedCard = result?.persistedCard || {};
+  const providerResult = result?.result || {};
+  const binCheck = result?.binCheck || null;
+  const tokenization = result?.tokenization || null;
+  const binDetails = binCheck?.details || {};
+  const ipDetails = binCheck?.ipDetails || null;
+
+  if (!target) {
+    return;
+  }
+
+  const operationTitle = `${result?.provider || "Provider"} ${result?.operation || "operation"}`;
+  const status = result?.status || providerResult.status || (result?.success === true ? "success" : result?.success === false ? "failed" : "unknown");
+  const providerMessage = result?.failureReason || result?.responseMessage || providerResult.responseMessage || providerResult.error || "İşlem tamamlandı";
+
+  target.innerHTML = `
+    <article class="list-card pretty-message ${statusClass(status)}">
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(operationTitle)}</strong>
+        <span class="status-pill ${statusClass(status)}">${escapeHtml(status || "-")}</span>
+      </div>
+      <p>${escapeHtml(providerMessage)}</p>
+      ${renderKeyValueDetails({
+        "Operation Id": result?.operationId,
+        "HTTP Status": result?.httpStatus,
+        "Success": result?.success === undefined ? null : result.success ? "yes" : "no",
+        "Provider": result?.provider,
+        "Operation": result?.operation,
+        "Response Message": result?.responseMessage,
+        "Failure Reason": result?.failureReason,
+        "Transaction Id": providerResult.transactionId || providerResult.cloverChargeId,
+        "Auth Code": providerResult.authCode,
+        "Result Code": result?.resultCode || providerResult.resultCode,
+        "Payment Scenario": providerResult.storedCredential?.label || providerResult.storedCredential?.scenario,
+        "COF": providerResult.storedCredential?.cof,
+        "Scheduled": providerResult.storedCredential?.cofscheduled,
+        "Ecom Ind": providerResult.storedCredential?.ecomind,
+        "Amount": result?.amount?.requestedAmount || providerResult.amount,
+        "Submitted Amount": result?.amount?.submittedAmount || providerResult.submittedAmount,
+        "Provider Amount": result?.amount?.providerAmount || providerResult.providerAmount,
+        "Currency": providerResult.currency,
+        "AVS": providerResult.avsResult,
+        "CVV": providerResult.cvvResult,
+        "Online / CNP": providerResult.status === "approved" ? "accepted by provider" : "not approved",
+        "MOTO": providerResult.entryMode === "MOTO" ? "requested" : "not returned by provider",
+        "MCC": binDetails.mcc || binDetails.merchantCategoryCode || binDetails.merchant_category_code,
+        "Tokenized": tokenization?.ok ? "yes" : null,
+        "Verification Mode": providerResult.verificationMode,
+        "Submitted to Clover": providerResult.submittedToClover === undefined ? null : providerResult.submittedToClover ? "yes" : "no"
+      })}
+    </article>
+    <article class="list-card">
+      <strong>Mapped Card Data</strong>
+      ${renderKeyValueDetails({
+        "Card Id": result?.cardId,
+        "Stored Provider": persistedCard.provider,
+        "Card": persistedCard.maskedPan || card.maskedPan,
+        "BIN": persistedCard.first6 || card.first6,
+        "Last4": persistedCard.last4 || card.last4,
+        "Brand": persistedCard.brand || card.brand,
+        "Expiry": persistedCard.expMonth && persistedCard.expYear ? `${persistedCard.expMonth}/${persistedCard.expYear}` : (card.expMonth && card.expYear ? `${card.expMonth}/${card.expYear}` : null),
+        "Holder": card.cardholderName,
+        "Source Token": card.sourceToken
+      })}
+    </article>
+    ${binCheck ? `
+      <article class="list-card bin-result">
+        <strong>BIN/IIN Result</strong>
+        <div>Status: <span class="status-pill ${statusClass(binCheck.status)}">${escapeHtml(binCheck.status || "-")}</span></div>
+        ${renderKeyValueDetails(binDetails)}
+        ${ipDetails ? `
+          <strong class="result-subtitle">IP Check</strong>
+          ${renderKeyValueDetails(ipDetails)}
+        ` : ""}
+      </article>
+    ` : ""}
+    <article class="list-card">
+      <strong>Raw Provider Result</strong>
+      <details class="raw-details">
+        <summary>Raw response</summary>
+        <pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+      </details>
+    </article>
+  `;
+}
+
+function syncManualPaymentMode() {
+  syncCardPaymentPageMode();
+  renderCardPaymentProviderList();
+  if (!isCardPaymentProviderSelected()) {
+    if (elements.manualPaymentResult) {
+      elements.manualPaymentResult.innerHTML = "";
+    }
+    return;
+  }
+
+  const provider = getSelectedCardPaymentProvider();
+  const method = getSelectedCardPaymentMethod();
+
+  if (elements.cardPaymentSelectedTitle) {
+    elements.cardPaymentSelectedTitle.textContent = provider?.label || "Card Payment";
+  }
+  renderCardPaymentProviderView(provider, method);
+  renderCardPaymentOperationTabs(provider, method);
+  renderCardPaymentDynamicFields(provider, method);
+  renderCardPaymentReportSummary();
+}
+
+function loadExternalScript(id, src) {
+  const existing = document.getElementById(id);
+  if (existing) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = id;
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function renderCloverIframeStatus(config) {
+  if (!elements.cloverIframeStatus) {
+    return;
+  }
+
+  elements.cloverIframeStatus.innerHTML = `
+    <article class="list-card">
+      <strong>Clover Tokenize</strong>
+      <div>Status: <span class="status-pill ${config.configured ? "status-good" : "status-bad"}">${config.configured ? "configured" : "missing config"}</span></div>
+      <div>Merchant: ${escapeHtml(config.merchantId || "-")}</div>
+      <div>SDK: ${escapeHtml(config.sdkUrl || "-")}</div>
+      <div>Missing: ${escapeHtml((config.missing || []).join(", ") || "-")}</div>
+    </article>
+  `;
+}
+
+function renderCloverIframeResult(result) {
+  const verification = result?.verification || {};
+  const card = result?.card || {};
+  const savedCard = result?.savedCard || {};
+  const binCheck = result?.binCheck || {};
+  const fraudChecks = verification.fraudChecks || {};
+  const binDetails = binCheck.details || {};
+  elements.cloverIframeResult.innerHTML = `
+    <article class="list-card">
+      <strong>Tokenize Verification</strong>
+      <div>Status: <span class="status-pill ${statusClass(verification.status)}">${escapeHtml(verification.status || "-")}</span></div>
+      <div>Mode: ${escapeHtml(verification.verificationMode || "-")}</div>
+      <div>Submitted to Clover: ${verification.submittedToClover ? "yes" : "no"}</div>
+      ${verification.cloverChargeId ? `<div>Charge: ${escapeHtml(verification.cloverChargeId)}</div>` : ""}
+      ${verification.amount ? `<div>Amount: ${escapeHtml(verification.amount)} ${escapeHtml(verification.currency || "")}</div>` : ""}
+      ${renderKeyValueDetails({
+        "Card Id": result?.cardId,
+        "Card": card.maskedPan,
+        "Stored Card": savedCard.maskedPan,
+        "BIN": savedCard.first6 || card.first6,
+        "Last4": savedCard.last4 || card.last4,
+        "Holder": card.cardholderName,
+        "Source Token": card.sourceToken || verification.sourceToken,
+        "CVC Check": fraudChecks.cvcCheck,
+        "Address Check": fraudChecks.addressLine1Check,
+        "ZIP Check": fraudChecks.addressZipCheck
+      })}
+      ${verification.message ? `<div>${escapeHtml(verification.message)}</div>` : ""}
+      ${verification.error ? `<pre>${escapeHtml(JSON.stringify({ error: verification.error }, null, 2))}</pre>` : ""}
+    </article>
+    <article class="list-card bin-result">
+      <strong>BIN/IIN Result</strong>
+      <div>Status: <span class="status-pill ${statusClass(binCheck.status)}">${escapeHtml(binCheck.status || "-")}</span></div>
+      ${renderKeyValueDetails(binDetails)}
+    </article>
+  `;
+}
+
+async function initializeCloverIframeCheckout() {
+  if (!elements.cloverIframeCheckoutForm) {
+    return null;
+  }
+  if (state.cloverIframe.loading) {
+    return state.cloverIframe.loading;
+  }
+  if (state.cloverIframe.mounted) {
+    return state.cloverIframe.config;
+  }
+
+  state.cloverIframe.loading = (async () => {
+    const config = await api("/providers/clover/iframe-config");
+    state.cloverIframe.config = config;
+    renderCloverIframeStatus(config);
+
+    if (!config.configured) {
+      throw new Error(`Missing ${config.missing.join(", ")}`);
+    }
+
+    await loadExternalScript(CLOVER_IFRAME_SCRIPT_ID, config.sdkUrl);
+    if (!window.Clover) {
+      throw new Error("Clover iframe SDK did not initialize");
+    }
+
+    const clover = new window.Clover(config.apiAccessKey, {
+      merchantId: config.merchantId,
+      locale: config.locale || "en-US"
+    });
+    const iframeElements = clover.elements();
+    const styles = {
+      body: {
+        fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
+        fontSize: "14px"
+      },
+      input: {
+        color: "#e7f4ed"
+      }
+    };
+
+    const cardNumber = iframeElements.create("CARD_NUMBER", styles);
+    const cardDate = iframeElements.create("CARD_DATE", styles);
+    const cardCvv = iframeElements.create("CARD_CVV", styles);
+    const cardPostalCode = iframeElements.create("CARD_POSTAL_CODE", styles);
+
+    cardNumber.mount("#cloverIframeCardNumber");
+    cardDate.mount("#cloverIframeCardDate");
+    cardCvv.mount("#cloverIframeCardCvv");
+    cardPostalCode.mount("#cloverIframeCardPostalCode");
+
+    state.cloverIframe.clover = clover;
+    state.cloverIframe.mounted = true;
+    return config;
+  })();
+
+  try {
+    return await state.cloverIframe.loading;
+  } finally {
+    state.cloverIframe.loading = null;
+  }
 }
 
 function escapeHtml(value) {
@@ -845,11 +2678,65 @@ async function loadAuditLogs() {
   renderAuditLogs();
 }
 
+async function loadUnchargebackCases() {
+  const result = await api("/unchargeback/cases");
+  state.unchargebackCases = result.data || [];
+  renderUnchargebackCases();
+}
+
+async function loadProviderReports() {
+  state.providerReports = await api("/provider-reports?limit=0");
+  renderProviderReports();
+}
+
+async function loadPaymentProcessorLogs() {
+  const query = getPaymentProcessorQueryString();
+  state.paymentProcessorLogs = await api(`/payment-processors/logs${query ? `?${query}` : ""}`);
+  state.paymentProcessorHealth = state.paymentProcessorLogs.health || state.paymentProcessorHealth;
+  renderPaymentProcessorLogs();
+  renderProcessorHealthDots();
+}
+
+async function loadPaymentProcessorHealth() {
+  state.paymentProcessorHealth = await api("/payment-processors/health");
+  renderProcessorHealthDots();
+}
+
+async function loadCloverLearningStatus() {
+  const status = await api("/providers/clover/learning/status");
+  renderGenericProviderResult(elements.cloverLearningStatus, "Machine Learning Scaffold", status);
+}
+
+async function loadBurpSuiteTraffic() {
+  const result = await api("/security/burp-suite/traffic?limit=60");
+  state.burpSuite.status = result.status;
+  state.burpSuite.events = result.events || [];
+  state.burpSuite.pending = result.pending || [];
+  state.burpSuite.otpMessages = result.otpMessages || [];
+  renderBurpSuite();
+}
+
+async function ensureProviderDataLoaded() {
+  if (state.providerOperationCatalog && state.paymentProviders) {
+    return;
+  }
+  if (!state.providerDataLoading) {
+    state.providerDataLoading = loadProviderData().finally(() => {
+      state.providerDataLoading = null;
+    });
+  }
+  await state.providerDataLoading;
+}
+
 async function loadProviderData() {
   state.paymentProviders = await api("/config/providers");
+  state.providerOperationCatalog = await api("/provider-operations/catalog");
   state.voiceProviders = await api("/provider-router/status");
   renderPaymentProviders();
   renderVoiceProviders();
+  populateManualPaymentProviders({ preserve: true });
+  populateManualPaymentOperations({ preserve: true });
+  syncManualPaymentMode();
 }
 
 async function loadCards() {
@@ -879,7 +2766,10 @@ async function bootAuthenticatedApp() {
   await loadUsers();
   await loadCards();
   await loadAuditLogs();
+  await loadUnchargebackCases();
   await loadProviderData();
+  await loadProviderReports();
+  await loadPaymentProcessorHealth().catch(() => {});
   showCardsRoute();
 }
 
@@ -924,6 +2814,235 @@ elements.addressFieldsToggle?.addEventListener("click", () => {
   elements.addressFields.hidden = !elements.addressFields.hidden;
 });
 
+elements.providerReportsRefresh?.addEventListener("click", async () => {
+  try {
+    await loadProviderReports();
+  } catch (error) {
+    elements.providerReportsList.innerHTML = `<article class="list-card"><strong>Provider Report Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+  }
+});
+
+elements.paymentProcessorFilterForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const processor = elements.paymentProcessorFilterForm?.elements?.processor?.value || "";
+  if (processor && getPaymentProcessorRouteKey() !== processor) {
+    window.location.hash = `#/payment-processors/${encodeURIComponent(processor)}`;
+    return;
+  }
+  if (!processor && getPaymentProcessorRouteKey()) {
+    window.location.hash = "#/payment-processors";
+    return;
+  }
+  try {
+    await loadPaymentProcessorLogs();
+  } catch (error) {
+    elements.paymentProcessorLogsList.innerHTML = `<article class="list-card"><strong>Processor Log Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+  }
+});
+
+elements.paymentProcessorFilterForm?.addEventListener("change", (event) => {
+  if (event.target?.name === "processor") {
+    const processor = event.target.value;
+    window.location.hash = processor ? `#/payment-processors/${encodeURIComponent(processor)}` : "#/payment-processors";
+  }
+});
+
+elements.paymentProcessorFilterForm?.addEventListener("input", (event) => {
+  if (event.target?.matches("[data-money-format]")) {
+    formatProcessorMoneyInput(event.target);
+  }
+});
+
+elements.paymentProcessorLogsRefresh?.addEventListener("click", async () => {
+  try {
+    await loadPaymentProcessorLogs();
+  } catch (error) {
+    elements.paymentProcessorLogsList.innerHTML = `<article class="list-card"><strong>Processor Log Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+  }
+});
+
+elements.paymentProcessorLogsList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-json-modal]");
+  if (!button) {
+    return;
+  }
+  if (state.user?.role !== "admin" || state.paymentProcessorLogs?.canViewJsonModels !== true) {
+    return;
+  }
+  const modelId = button.dataset.jsonModal;
+  openJsonModal(button.dataset.jsonTitle || "JSON", state.paymentProcessorJsonModels[modelId] || {});
+});
+
+elements.cardPaymentReportsRefresh?.addEventListener("click", async () => {
+  try {
+    await loadProviderReports();
+  } catch (error) {
+    if (elements.cardPaymentReportList) {
+      elements.cardPaymentReportList.innerHTML = `<article class="list-card"><strong>Provider Report Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+    }
+  }
+});
+
+elements.burpRefreshButton?.addEventListener("click", async () => {
+  try {
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "Burp Refresh Error", { error: error.message });
+  }
+});
+
+elements.burpStartForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = removeEmptyFields(formToObject(elements.burpStartForm));
+  payload.proxyEnabled = elements.burpStartForm.elements.proxyEnabled.checked;
+  payload.allowInsecureTls = elements.burpStartForm.elements.allowInsecureTls.checked;
+  payload.holdSeconds = Number(payload.holdSeconds || 60);
+
+  try {
+    state.burpSuite.status = await api("/security/burp-suite/start", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "Burp Start Error", { error: error.message });
+  }
+});
+
+elements.burpStopButton?.addEventListener("click", async () => {
+  try {
+    state.burpSuite.status = await api("/security/burp-suite/stop", { method: "POST" });
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "Burp Stop Error", { error: error.message });
+  }
+});
+
+elements.burpArmOtpForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = removeEmptyFields(formToObject(elements.burpArmOtpForm));
+  payload.holdSeconds = Number(payload.holdSeconds || 60);
+
+  try {
+    state.burpSuite.status = await api("/security/burp-suite/otp/arm", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "OTP Capture Error", { error: error.message });
+  }
+});
+
+elements.burpOtpSendForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = removeEmptyFields(formToObject(elements.burpOtpSendForm));
+  payload.codeLength = Number(payload.codeLength || 6);
+  payload.armCapture = elements.burpOtpSendForm.elements.armCapture.checked;
+  payload.pathKeyword = "otp";
+
+  try {
+    const result = await api("/security/burp-suite/otp/send", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.burpOtpSendResult, "OTP Send", result);
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpOtpSendResult, "OTP Send Error", { error: error.message });
+  }
+});
+
+elements.burpPendingList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-burp-pending-id]");
+  if (!button) {
+    return;
+  }
+  selectBurpPending(button.dataset.burpPendingId);
+});
+
+elements.burpReleaseForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = formToObject(elements.burpReleaseForm);
+  const pendingId = payload.pendingId;
+  let headers;
+  let body;
+
+  try {
+    headers = payload.headers ? JSON.parse(payload.headers) : {};
+    body = payload.body ? JSON.parse(payload.body) : {};
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "Response JSON Error", { error: error.message });
+    return;
+  }
+
+  try {
+    await api(`/security/burp-suite/pending/${encodeURIComponent(pendingId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({
+        status: Number(payload.status || 200),
+        headers,
+        body
+      })
+    });
+    elements.burpReleaseForm.hidden = true;
+    state.burpSuite.selectedPendingId = null;
+    await loadBurpSuiteTraffic();
+  } catch (error) {
+    renderGenericProviderResult(elements.burpStatus, "Response Release Error", { error: error.message });
+  }
+});
+
+elements.unchargebackForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = removeEmptyFields(formToObject(elements.unchargebackForm));
+  payload.contentPrice = Number(payload.contentPrice);
+
+  try {
+    const created = await api("/unchargeback/cases", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    elements.unchargebackForm.reset();
+    renderGenericProviderResult(elements.unchargebackResult, "Unchargeback Case Created", created);
+    await loadUnchargebackCases();
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.unchargebackResult, "Unchargeback Error", { error: error.message });
+  }
+});
+
+elements.unchargebackList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-unchargeback-action]");
+  if (!button) {
+    return;
+  }
+
+  const kind = button.dataset.unchargebackAction;
+  const caseId = button.dataset.caseId;
+  const label = kind === "widget" ? "Tip Widget" : "Content";
+  const embedHtml = window.prompt(`${label} iframe embed HTML`);
+  if (!embedHtml) {
+    return;
+  }
+
+  try {
+    const updated = await api(`/unchargeback/cases/${caseId}/${kind}`, {
+      method: "POST",
+      body: JSON.stringify({ embedHtml })
+    });
+    renderGenericProviderResult(elements.unchargebackResult, `${label} Saved`, {
+      id: updated.id,
+      src: updated[`${kind}_src`]
+    });
+    await loadUnchargebackCases();
+    await loadAuditLogs();
+  } catch (error) {
+    window.alert(error.message);
+    renderGenericProviderResult(elements.unchargebackResult, `${label} Error`, { error: error.message });
+  }
+});
+
 elements.checkerTabs.forEach((tab) => {
   tab.addEventListener("click", () => showCheckerTab(tab.dataset.checkerTab));
 });
@@ -934,6 +3053,46 @@ document.addEventListener("change", (event) => {
     syncCardSelect(select);
   }
 });
+
+document.addEventListener("submit", (event) => {
+  rememberActionButton(event.submitter);
+}, true);
+
+document.addEventListener("click", (event) => {
+  const openDropdowns = document.querySelectorAll(".nav-dropdown[open]");
+  const activeDropdown = event.target.closest(".nav-dropdown");
+  openDropdowns.forEach((dropdown) => {
+    const clickedDropdownLink = dropdown.contains(event.target) && event.target.closest(".nav-dropdown-menu a");
+    if (!activeDropdown || clickedDropdownLink) {
+      dropdown.open = false;
+    }
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") {
+    return;
+  }
+  document.querySelectorAll(".nav-dropdown[open]").forEach((dropdown) => {
+    dropdown.open = false;
+  });
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.type === "submit") {
+    return;
+  }
+  if (button.matches("[data-card-payment-operation], [data-checker-tab]")) {
+    return;
+  }
+  rememberActionButton(button);
+  window.setTimeout(() => {
+    if (state.pendingRequests === 0) {
+      setButtonLoading(button, false);
+    }
+  }, 1200);
+}, true);
 
 elements.modalClose?.addEventListener("click", closeModal);
 elements.modalOverlay?.addEventListener("click", (event) => {
@@ -948,14 +3107,13 @@ elements.cardForm.addEventListener("submit", async (event) => {
   const payload = removeEmptyFields(formToObject(elements.cardForm));
   const pan = String(payload.pan || "").replace(/\D/g, "");
   payload.pan = pan;
-  delete payload.cvv2;
 
   if (pan.length < 12) {
     alert("Card number is required");
     return;
   }
 
-  payload.provider = "paypal";
+  payload.provider = "globalpayments";
   payload.first6 = pan.slice(0, 6);
   payload.last4 = pan.slice(-4);
   payload.maskedPan = `${payload.first6}******${payload.last4}`;
@@ -1180,7 +3338,273 @@ elements.paypalBinCheckForm?.addEventListener("submit", async (event) => {
     }
     await loadAuditLogs();
   } catch (error) {
-    renderGenericProviderResult(elements.paypalBinCheckResult, "PayPal BIN Check Error", { error: error.message });
+    renderGenericProviderResult(elements.paypalBinCheckResult, "RapidAPI BIN Check Error", { error: error.message });
+  }
+});
+
+elements.cloverVerifyForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = applySelectedCardPayload(
+    elements.cloverVerifyForm,
+    removeEmptyFields(formToObject(elements.cloverVerifyForm)),
+    { includeBilling: false }
+  );
+  if (!payload.bin && payload.first6) {
+    payload.bin = payload.first6;
+  }
+  payload.amount = Number(payload.amount || 1);
+
+  try {
+    const result = await api("/providers/clover/cards/verify-with-bin", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderCloverVerifyResult(result);
+    await loadCards();
+    if (payload.cardId) {
+      await refreshCardChecks(payload.cardId);
+    }
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.cloverVerifyResult, "Clover Verify + BIN Error", { error: error.message });
+  }
+});
+
+elements.providerOperationForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = applySelectedCardPayload(
+    elements.providerOperationForm,
+    removeEmptyFields(formToObject(elements.providerOperationForm))
+  );
+  if (payload.amount) {
+    payload.amount = Number(payload.amount);
+  }
+  if (!payload.bin && payload.first6) {
+    payload.bin = payload.first6;
+  }
+  if (payload.token && !payload.providerPaymentToken) {
+    payload.providerPaymentToken = payload.token;
+  }
+
+  try {
+    const result = await api("/provider-operations/cards", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderProviderOperationResult(result);
+    await loadCards();
+    if (result.cardId) {
+      await refreshCardChecks(result.cardId);
+    }
+    await loadAuditLogs();
+    await loadProviderReports();
+  } catch (error) {
+    const payload = errorResponsePayload(error);
+    if (payload?.provider || payload?.operationId) {
+      renderProviderOperationResult(payload, elements.providerOperationResult);
+    } else {
+      renderGenericProviderResult(elements.providerOperationResult, "Provider Operation Error", payload);
+    }
+  }
+});
+
+elements.manualPaymentForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = applySelectedCardPayload(
+    elements.manualPaymentForm,
+    removeEmptyFields(formToObject(elements.manualPaymentForm))
+  );
+  const selectedMethod = getSelectedCardPaymentMethod();
+  const selectedMethodKey = payload.operation;
+  const isPropelr = payload.provider === "propelr" || payload.provider === "propelrpay";
+  const isPropelrSequence = isPropelr && selectedMethodKey === "amount_sequence";
+  const isTransactionDetail = isPropelr && selectedMethodKey === "transaction_detail";
+  if (selectedMethod?.operation) {
+    payload.operation = selectedMethod.operation;
+  }
+  if (payload.amount && !isPropelr) {
+    payload.amount = Number(payload.amount);
+  }
+  if (payload.balanceAmount) {
+    payload.balanceAmount = Number(payload.balanceAmount);
+  }
+  if (!payload.bin && payload.pan) {
+    payload.bin = String(payload.pan).replace(/\D/g, "").slice(0, 6);
+  }
+  if (!payload.reference && !isPropelr) {
+    payload.reference = `manual-${payload.provider}-${Date.now()}`;
+  }
+  if (isPropelr) {
+    payload.account = payload.account || String(payload.pan || "").replace(/\D/g, "");
+    if (!payload.expiry && payload.expMonth && payload.expYear) {
+      payload.expiry = `${String(payload.expMonth).padStart(2, "0")}${String(payload.expYear).slice(-2)}`;
+    }
+    payload.expiry = String(payload.expiry || "").replace(/\D/g, "");
+    if (isPropelrSequence) {
+      payload.amounts = [payload.sequenceAmount1 || "1,100.12", payload.sequenceAmount2 || "1,100.25"];
+      delete payload.amount;
+    }
+    delete payload.cvv2;
+    delete payload.expMonth;
+    delete payload.expYear;
+    delete payload.cardholderName;
+    delete payload.billingZip;
+    delete payload.billingCountry;
+    delete payload.balanceAmount;
+    delete payload.currency;
+    delete payload.reference;
+    delete payload.sequenceAmount1;
+    delete payload.sequenceAmount2;
+  }
+
+  try {
+    let result;
+    if (isPropelrSequence) {
+      result = await api("/providers/propelr/amount-sequence", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderGenericProviderResult(elements.manualPaymentResult, "Propelr 2 Request", result);
+      return;
+    } else if (isTransactionDetail) {
+      result = await api(`/providers/propelr/transactions/${encodeURIComponent(payload.transactionId)}`);
+      renderGenericProviderResult(elements.manualPaymentResult, "Propelr Transaction Detail", result);
+      return;
+    } else if (payload.operation === "bin_check") {
+      result = await api("/providers/paypal/manager/cards/bin-check", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderBinCheckResult(result, elements.manualPaymentResult);
+    } else if (payload.operation === "balance_check") {
+      result = await api("/checkers/balance", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderGenericProviderResult(elements.manualPaymentResult, "Balance Check", result);
+    } else {
+      result = await api("/provider-operations/cards", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      renderProviderOperationResult(result, elements.manualPaymentResult);
+    }
+    await loadCards();
+    if (result.cardId) {
+      await refreshCardChecks(result.cardId);
+    }
+    await loadAuditLogs();
+  } catch (error) {
+    const payload = errorResponsePayload(error);
+    if (payload?.provider || payload?.operationId) {
+      renderProviderOperationResult(payload, elements.manualPaymentResult);
+    } else {
+      renderGenericProviderResult(elements.manualPaymentResult, "Provider Error", payload);
+    }
+  }
+});
+
+elements.manualPaymentForm?.elements?.operation?.addEventListener("change", syncManualPaymentMode);
+elements.manualPaymentForm?.elements?.provider?.addEventListener("change", () => {
+  const providerKey = elements.manualPaymentForm?.elements?.provider?.value;
+  if (providerKey) {
+    window.location.hash = getCardPaymentProviderHref(providerKey);
+  }
+  populateManualPaymentOperations({ preserve: false });
+  syncManualPaymentMode();
+});
+elements.cardPaymentOperationTabs?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-card-payment-operation]");
+  if (!button || !elements.manualPaymentForm?.elements?.operation) {
+    return;
+  }
+  elements.manualPaymentForm.elements.operation.value = button.dataset.cardPaymentOperation;
+  syncManualPaymentMode();
+});
+elements.manualPaymentForm?.addEventListener("input", (event) => {
+  if (event.target?.name === "cardId") {
+    syncManualPaymentCardSearch();
+  }
+  if (event.target?.name === "storedCredentialScenario") {
+    applyStoredCredentialScenarioDefaults();
+  }
+});
+elements.manualPaymentForm?.addEventListener("change", (event) => {
+  if (event.target?.name === "cardId") {
+    syncManualPaymentCardSearch();
+  }
+  if (event.target?.name === "storedCredentialScenario") {
+    applyStoredCredentialScenarioDefaults();
+  }
+});
+populateManualPaymentProviders({ preserve: true });
+populateManualPaymentOperations({ preserve: true });
+syncManualPaymentMode();
+renderManualPaymentSummary(null);
+
+elements.cloverIframeInitButton?.addEventListener("click", async () => {
+  try {
+    await initializeCloverIframeCheckout();
+  } catch (error) {
+    renderGenericProviderResult(elements.cloverIframeStatus, "Clover Tokenize Error", { error: error.message });
+  }
+});
+
+elements.cloverIframeCheckoutForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await initializeCloverIframeCheckout();
+    const payload = removeEmptyFields(formToObject(elements.cloverIframeCheckoutForm));
+    payload.amount = Number(payload.amount || 1);
+    const tokenResult = await state.cloverIframe.clover.createToken();
+    const source = tokenResult?.token;
+    if (!source) {
+      throw new Error(JSON.stringify(tokenResult?.errors || tokenResult || "Clover tokenization failed"));
+    }
+
+    const result = await api("/providers/clover/cards/iframe-verify", {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        source,
+        cardDetails: tokenResult?.card || tokenResult?.cardData || tokenResult?.paymentMethod || null
+      })
+    });
+    renderCloverIframeResult(result);
+    await loadCards();
+    await loadAuditLogs();
+    await loadProviderReports();
+  } catch (error) {
+    renderGenericProviderResult(elements.cloverIframeResult, "Clover Tokenize Verification Error", { error: error.message });
+  }
+});
+
+elements.cloverLearningRefreshButton?.addEventListener("click", async () => {
+  try {
+    await loadCloverLearningStatus();
+  } catch (error) {
+    renderGenericProviderResult(elements.cloverLearningStatus, "Machine Learning Error", { error: error.message });
+  }
+});
+
+elements.cloverLearningForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = removeEmptyFields(formToObject(elements.cloverLearningForm));
+    if (payload.quantity) {
+      payload.quantity = Number(payload.quantity);
+    }
+    if (payload.maxAttempts) {
+      payload.maxAttempts = Number(payload.maxAttempts);
+    }
+    const result = await api("/providers/clover/learning/runs", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    console.log("[clover-machine-learning:response]", result);
+    renderCloverLearningRun(result);
+  } catch (error) {
+    renderGenericProviderResult(elements.cloverLearningResult, "Machine Learning Run", { error: error.message });
   }
 });
 
@@ -1204,6 +3628,26 @@ elements.paypalLiveCheckForm?.addEventListener("submit", async (event) => {
     await loadAuditLogs();
   } catch (error) {
     renderGenericProviderResult(elements.paypalLiveCheckResult, "PayPal Live Check Error", { error: error.message });
+  }
+});
+
+elements.paypalSaleForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = applySelectedCardPayload(
+    elements.paypalSaleForm,
+    removeEmptyFields(formToObject(elements.paypalSaleForm))
+  );
+  payload.amount = Number(payload.amount);
+
+  try {
+    const result = await api("/providers/paypal/direct-payment/cards/sale", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paypalSaleResult, "PayPal Sale", result);
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.paypalSaleResult, "PayPal Sale Error", { error: error.message });
   }
 });
 
@@ -1257,6 +3701,29 @@ elements.paypalCaptureForm?.addEventListener("submit", async (event) => {
   }
 });
 
+elements.paypalVoidForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = formToObject(elements.paypalVoidForm);
+
+  if (isManualCardValue(payload.cardId)) {
+    delete payload.cardId;
+  }
+  if (!payload.authorizationPnref) {
+    delete payload.authorizationPnref;
+  }
+
+  try {
+    const result = await api("/providers/paypal/direct-payment/cards/void", {
+      method: "POST",
+      body: JSON.stringify(removeEmptyFields(payload))
+    });
+    renderGenericProviderResult(elements.paypalVoidResult, "PayPal Void", result);
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.paypalVoidResult, "PayPal Void Error", { error: error.message });
+  }
+});
+
 elements.cloverPreauthForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = formToObject(elements.cloverPreauthForm);
@@ -1291,22 +3758,6 @@ elements.cloverRefundForm?.addEventListener("submit", async (event) => {
   }
 });
 
-elements.cloverVoidForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const payload = formToObject(elements.cloverVoidForm);
-
-  try {
-    const result = await api("/providers/clover/void", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    renderGenericProviderResult(elements.cloverVoidResult, "Clover Void Result", result);
-    await loadAuditLogs();
-  } catch (error) {
-    renderGenericProviderResult(elements.cloverVoidResult, "Clover Void Error", { error: error.message });
-  }
-});
-
 elements.userForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = formToObject(elements.userForm);
@@ -1337,17 +3788,30 @@ elements.cardsTableBody.addEventListener("click", async (event) => {
   if (elements.providerVerificationForm?.elements?.cardId) {
     elements.providerVerificationForm.elements.cardId.value = cardId;
   }
+  if (elements.manualPaymentForm?.elements?.cardId) {
+    elements.manualPaymentForm.elements.cardId.value = cardId;
+    syncManualPaymentCardSearch();
+  }
   if (elements.paypalBinCheckForm?.elements?.cardId) {
     elements.paypalBinCheckForm.elements.cardId.value = cardId;
   }
   if (elements.paypalLiveCheckForm?.elements?.cardId) {
     elements.paypalLiveCheckForm.elements.cardId.value = cardId;
   }
+  if (elements.paypalSaleForm?.elements?.cardId) {
+    elements.paypalSaleForm.elements.cardId.value = cardId;
+  }
   if (elements.paypalAuthForm?.elements?.cardId) {
     elements.paypalAuthForm.elements.cardId.value = cardId;
   }
   if (elements.paypalCaptureForm?.elements?.cardId) {
     elements.paypalCaptureForm.elements.cardId.value = cardId;
+  }
+  if (elements.paypalVoidForm?.elements?.cardId) {
+    elements.paypalVoidForm.elements.cardId.value = cardId;
+  }
+  if (elements.unchargebackForm?.elements?.cardId) {
+    elements.unchargebackForm.elements.cardId.value = cardId;
   }
 
   if (action === "select" || action === "enroll") {
@@ -1396,6 +3860,12 @@ elements.cardsTableBody.addEventListener("click", async (event) => {
 });
 
 window.addEventListener("hashchange", renderRoute);
+
+setInterval(() => {
+  if (state.user && getCurrentRoute() === "burp-suite") {
+    loadBurpSuiteTraffic().catch(() => {});
+  }
+}, 1000);
 
 (async function init() {
   localStorage.removeItem("clover_panel_token");

@@ -1,4 +1,5 @@
 const numberService = require('../services/numberService');
+const twilioVerifyService = require('../services/twilioVerifyService');
 
 const addNumber = async (req, res) => {
     try {
@@ -54,9 +55,65 @@ const listAll = async (req, res) => {
     }
 };
 
+const startTwilioVerification = async (req, res) => {
+    try {
+        const { numberId } = req.params;
+        const { channel = 'sms' } = req.body;
+        const number = await numberService.getNumberById(numberId);
+
+        if (!number) {
+            return res.status(404).json({ error: 'Number not found' });
+        }
+
+        const result = await twilioVerifyService.startPhoneVerification(number.phoneNumber, channel);
+        res.json({
+            success: true,
+            numberId,
+            phoneNumber: number.phoneNumber,
+            verification: result
+        });
+    } catch (err) {
+        res.status(err.statusCode || 500).json({ error: err.message });
+    }
+};
+
+const checkTwilioVerification = async (req, res) => {
+    try {
+        const { numberId } = req.params;
+        const { code } = req.body;
+        const number = await numberService.getNumberById(numberId);
+
+        if (!number) {
+            return res.status(404).json({ error: 'Number not found' });
+        }
+        if (!code) {
+            return res.status(400).json({ error: 'code is required' });
+        }
+
+        const result = await twilioVerifyService.checkPhoneVerification(number.phoneNumber, code);
+        if (result.status === 'approved' || result.valid) {
+            const updated = await numberService.markNumberVerified(numberId);
+            return res.json({
+                success: true,
+                number: updated,
+                verification: result
+            });
+        }
+
+        res.status(400).json({
+            success: false,
+            verification: result
+        });
+    } catch (err) {
+        res.status(err.statusCode || 500).json({ error: err.message });
+    }
+};
+
 module.exports = {
     addNumber,
     verifyNumber,
     getCardNumbers,
-    listAll
+    listAll,
+    startTwilioVerification,
+    checkTwilioVerification
 };
