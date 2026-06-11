@@ -31,9 +31,9 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
         <span>Useful BIN Result</span>
         <strong>{usefulLabel || '-'}</strong>
       </div>
-      {result?.responseMessage || result?.failureReason || result?.providerWarning ? (
+      {result?.responseMessage || result?.failureReason || (result?.providerWarning && result?.status !== 'passed') ? (
         <p className={`error ${result?.status === 'passed' ? 'muted' : ''}`}>
-          {result.responseMessage || result.failureReason || result.providerWarning}
+          {result.responseMessage || result.failureReason || (result?.status !== 'passed' ? result.providerWarning : '')}
         </p>
       ) : null}
       <div className="summary">

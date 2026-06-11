@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:3103'
 
 export default defineConfig({
-  base: '/react/',
+  base: './',
   plugins: [react(), tailwindcss()],
   build: {
     outDir: '../PaymentApi/public/react',

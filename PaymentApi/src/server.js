@@ -43,6 +43,7 @@ burpSuiteService.installBurpSuiteIntegration();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.resolve(process.cwd(), "public"), { index: false }));
+app.use("/assets", express.static(path.resolve(process.cwd(), "public", "react", "assets"), { index: false }));
 app.use((req, res, next) => {
   const startedAt = Date.now();
   const shouldAudit = req.path.startsWith("/api/") &&

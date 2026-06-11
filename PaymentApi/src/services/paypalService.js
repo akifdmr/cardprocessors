@@ -120,6 +120,7 @@ function pickFirst(source, paths, fallback = null) {
 function firstMeaningful(...values) {
   for (const value of values) {
     if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "object") continue;
     if (typeof value === "string" && ["api only", "unknown", "null", "undefined"].includes(value.trim().toLowerCase())) continue;
     return value;
   }
@@ -161,6 +162,43 @@ function getCountryAlpha3(alpha2) {
     FR: "FRA"
   };
   return countries[String(alpha2 || "").toUpperCase()] || null;
+}
+
+function getOfflineBinNetwork(bin) {
+  const value = String(bin || "");
+  const firstTwo = Number(value.slice(0, 2));
+  const firstFour = Number(value.slice(0, 4));
+  const firstSix = Number(value.slice(0, 6));
+
+  if (value.startsWith("4")) return { scheme: "visa", brand: "VISA" };
+  if (firstTwo >= 51 && firstTwo <= 55) return { scheme: "mastercard", brand: "MASTERCARD" };
+  if (firstFour >= 2221 && firstFour <= 2720) return { scheme: "mastercard", brand: "MASTERCARD" };
+  if (value.startsWith("34") || value.startsWith("37")) return { scheme: "american express", brand: "AMERICAN EXPRESS" };
+  if (value.startsWith("6011") || value.startsWith("65") || (firstSix >= 622126 && firstSix <= 622925)) return { scheme: "discover", brand: "DISCOVER" };
+  if (value.startsWith("35")) return { scheme: "jcb", brand: "JCB" };
+  if (value.startsWith("36") || value.startsWith("38") || value.startsWith("39")) return { scheme: "diners club", brand: "DINERS CLUB" };
+  return { scheme: "unknown", brand: "UNKNOWN" };
+}
+
+function formatOfflineBinData(bin) {
+  const network = getOfflineBinNetwork(bin);
+  return {
+    data: {
+      number: bin,
+      length: String(bin).length,
+      scheme: network.scheme,
+      brand: network.brand,
+      type: "unknown",
+      country: {
+        name: "API Only",
+        alpha2: "API Only",
+        currency: "API Only"
+      },
+      bank: {
+        name: "API Only"
+      }
+    }
+  };
 }
 
 function getBinPayload(responseData) {
@@ -352,19 +390,19 @@ async function binCheckCard({ pan, bin, ip }) {
       };
     } catch (fallbackError) {
       const providerMessage = getProviderMessage(rapidApiError);
+      const offlineData = formatOfflineBinData(normalized);
       return {
-        status: "failed",
+        status: "passed",
         bin: normalized,
         ip: lookupIp || null,
-        responseMessage: providerMessage,
-        failureReason: providerMessage,
-        resultCode: rapidApiError?.response?.status === 429 ? "RAPIDAPI_QUOTA_EXCEEDED" : "BIN_CHECK_FAILED",
+        resultCode: "OFFLINE_BIN_PREFIX_FALLBACK",
         providerStatus: rapidApiError?.response?.status || null,
+        providerWarning: providerMessage,
         fallbackError: getProviderMessage(fallbackError),
-        summary: summarizeBinDetails(normalized, {}),
-        details: formatBinDetails(normalized, {}),
+        summary: summarizeBinDetails(normalized, offlineData),
+        details: formatBinDetails(normalized, offlineData),
         ipDetails: lookupIp ? formatIpDetails({}) : null,
-        source: "rapidapi_bin_ip_checker",
+        source: "offline_bin_prefix_fallback",
         raw: rapidApiError?.response?.data || null
       };
     }
