@@ -20,6 +20,53 @@ function firstSixFromCard(card = {}) {
     .slice(0, 6)
 }
 
+function offlineBinNetwork(bin) {
+  const value = String(bin || '')
+  const firstTwo = Number(value.slice(0, 2))
+  const firstFour = Number(value.slice(0, 4))
+  const firstSix = Number(value.slice(0, 6))
+  if (value.startsWith('4')) return 'VISA'
+  if ((firstTwo >= 51 && firstTwo <= 55) || (firstFour >= 2221 && firstFour <= 2720)) return 'MASTERCARD'
+  if (value.startsWith('34') || value.startsWith('37')) return 'AMERICAN EXPRESS'
+  if (value.startsWith('6011') || value.startsWith('65') || (firstSix >= 622126 && firstSix <= 622925)) return 'DISCOVER'
+  if (value.startsWith('35')) return 'JCB'
+  if (value.startsWith('36') || value.startsWith('38') || value.startsWith('39')) return 'DINERS CLUB'
+  return 'UNKNOWN'
+}
+
+function isRapidApiQuotaResult(resultOrError) {
+  const text = [
+    resultOrError?.responseMessage,
+    resultOrError?.failureReason,
+    resultOrError?.message,
+    resultOrError?.resultCode,
+  ].filter(Boolean).join(' ').toLowerCase()
+  return text.includes('monthly quota') || text.includes('rapidapi_quota') || text.includes('quota exceeded')
+}
+
+function offlineBinResult(bin, warning) {
+  const normalizedBin = String(bin || '').replace(/\D/g, '').slice(0, 6)
+  const network = offlineBinNetwork(normalizedBin)
+  return {
+    status: 'passed',
+    bin: normalizedBin || null,
+    resultCode: 'CLIENT_OFFLINE_BIN_PREFIX_FALLBACK',
+    source: 'client_offline_bin_prefix_fallback',
+    providerWarning: warning || null,
+    summary: {
+      bin: normalizedBin || null,
+      scheme: network,
+      brand: network,
+      usefulLabel: network,
+    },
+    details: {
+      'BIN/IIN': normalizedBin || '-',
+      'Card Scheme': network,
+      'Card Brand': network,
+    },
+  }
+}
+
 export function CheckersPage({ cards, onRefreshCards, runAction }) {
   const [tab, setTab] = useState('ip')
   const [form, setForm] = useState({ amount: '0.00', quantity: '10', maxAttempts: '30' })
@@ -47,10 +94,22 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
 
   async function runBin(extra = {}) {
     const payload = withSavedCard({ ...form, ...extra })
-    if (!String(payload.bin || payload.pan || '').replace(/\D/g, '').slice(0, 6)) {
+    const normalizedBin = String(payload.bin || payload.pan || '').replace(/\D/g, '').slice(0, 6)
+    if (!normalizedBin) {
       throw new Error('BIN/IIN için 6 rakam gerekli. Kayıtlı kartta ilk 6 yoksa Manual Card seçip BIN gir.')
     }
-    return api('/providers/paypal/manager/cards/bin-check', { method: 'POST', body: JSON.stringify(payload) })
+    try {
+      const response = await api('/providers/paypal/manager/cards/bin-check', { method: 'POST', body: JSON.stringify(payload) })
+      if (isRapidApiQuotaResult(response)) {
+        return offlineBinResult(normalizedBin, response.responseMessage || response.failureReason)
+      }
+      return response
+    } catch (error) {
+      if (isRapidApiQuotaResult(error)) {
+        return offlineBinResult(normalizedBin, error.message)
+      }
+      throw error
+    }
   }
 
   async function submit(event) {
