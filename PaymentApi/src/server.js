@@ -6868,6 +6868,10 @@ app.use("/api/calls", requireAuth, callRoutes);
 app.use("/api/providers/clover/learning", createCloverLearningRouter({ requireAuth, requirePermission }));
 app.use("/api/clover/learning", createCloverLearningRouter({ requireAuth, requirePermission }));
 
+app.use("/api", (req, res) => {
+  sendApiError(res, req, 404, `API route not found: ${req.method} ${req.originalUrl}`, "NOT_FOUND");
+});
+
 app.use((error, req, res, _next) => {
   console.error(toSafeErrorLog(error));
   if (req.path?.startsWith("/api/")) {

@@ -3,12 +3,22 @@ export async function api(path, options = {}) {
     ...options,
     credentials: 'include',
     headers: {
+      Accept: 'application/json',
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
     },
   })
   const text = await response.text()
-  const data = text ? JSON.parse(text) : null
+  const contentType = response.headers.get('content-type') || ''
+  let data = null
+  if (text && contentType.includes('application/json')) {
+    data = JSON.parse(text)
+  } else if (text) {
+    const error = new Error(`API JSON yerine ${contentType || 'bilinmeyen'} cevap döndürdü: ${response.status} ${response.statusText}`)
+    error.status = response.status
+    error.responseText = text.slice(0, 500)
+    throw error
+  }
   if (!response.ok) {
     const error = new Error(data?.failureReason || data?.responseMessage || data?.error || 'Request failed')
     error.status = response.status
