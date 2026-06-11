@@ -9,7 +9,7 @@ import { PerfectGeneratorPanel } from './PerfectGeneratorPage'
 const tabs = [
   ['ip', 'IP Lookup'],
   ['bin', 'Card BIN Check'],
-  ['live', 'Card Live Check'],
+  ['live', 'PayPal / Card Live Check'],
   ['balance', 'Balance Check'],
   ['learning', 'Machine Learning / Card Üretim'],
 ]
@@ -59,7 +59,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     const loaderByTab = {
       ip: { label: 'IP/BIN istihbaratı çalışıyor', variant: 'auth', detail: 'BIN ve IP detayları sorgulanıyor' },
       bin: { label: 'Card BIN check çalışıyor', variant: 'auth', detail: 'Kart BIN bilgileri doğrulanıyor' },
-      live: { label: 'Card live check çalışıyor', variant: 'sale', detail: 'Live check ve BIN sorgusu birlikte çalışıyor' },
+      live: { label: 'PayPal/Card live check çalışıyor', variant: 'sale', detail: 'Authorization ve BIN sorgusu birlikte çalışıyor' },
       balance: { label: 'Balance check çalışıyor', variant: 'transaction', detail: 'Seçili kart için balance sorgusu gönderiliyor' },
       learning: { label: 'Card üretim modeli çalışıyor', variant: 'sequence', detail: 'Clover learning run başlatılıyor' },
     }

@@ -2836,6 +2836,7 @@ const providerOperationCatalog = {
     label: "PayPal",
     description: "PayPal NVP / Payflow payment operations.",
     methods: [
+      { key: "live_check", label: "Live Check", operation: "live", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Runs DoDirectPayment Authorization", "Use with cardholder authorization", "Void the authorization if you do not intend to capture"] },
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["DoDirectPayment sale"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["authorizationPnref", "amount", "captureComplete"], required: ["authorizationPnref", "amount"], features: ["Capture PayPal authorization"] },
