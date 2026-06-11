@@ -11,6 +11,7 @@ const state = {
   paymentProcessorLogs: null,
   paymentProcessorHealth: null,
   paymentProcessorJsonModels: {},
+  paymentProcessorLogById: {},
   providerOperationCatalog: null,
   burpSuite: {
     status: null,
@@ -72,6 +73,11 @@ const elements = {
   paymentProcessorSummary: document.getElementById("paymentProcessorSummary"),
   paymentProcessorLogsList: document.getElementById("paymentProcessorLogsList"),
   paymentProcessorLogsRefresh: document.getElementById("paymentProcessorLogsRefresh"),
+  paymentProcessorOperationPanel: document.getElementById("paymentProcessorOperationPanel"),
+  paymentProcessorOperationClose: document.getElementById("paymentProcessorOperationClose"),
+  paymentProcessorOperationForm: document.getElementById("paymentProcessorOperationForm"),
+  paymentProcessorOperationDynamicFields: document.getElementById("paymentProcessorOperationDynamicFields"),
+  paymentProcessorOperationResult: document.getElementById("paymentProcessorOperationResult"),
   manualPaymentForm: document.getElementById("manualPaymentForm"),
   manualPaymentResult: document.getElementById("manualPaymentResult"),
   manualPaymentCardSummary: document.getElementById("manualPaymentCardSummary"),
@@ -107,6 +113,10 @@ const elements = {
   paypalManagerInquiryResult: document.getElementById("paypalManagerInquiryResult"),
   paypalBinCheckForm: document.getElementById("paypalBinCheckForm"),
   paypalBinCheckResult: document.getElementById("paypalBinCheckResult"),
+  ipLookupForm: document.getElementById("ipLookupForm"),
+  ipLookupResult: document.getElementById("ipLookupResult"),
+  balanceCheckForm: document.getElementById("balanceCheckForm"),
+  balanceCheckResult: document.getElementById("balanceCheckResult"),
   cloverVerifyForm: document.getElementById("cloverVerifyForm"),
   cloverVerifyResult: document.getElementById("cloverVerifyResult"),
   paypalLiveCheckForm: document.getElementById("paypalLiveCheckForm"),
@@ -166,31 +176,12 @@ const PROCESSOR_ATTEMPT_TYPES = ["auth_check", "sale_check", "capture", "refund"
 const PROCESSOR_STATUSES = ["approved", "success", "failed", "declined", "recorded", "unknown"];
 const CARD_PAYMENT_CARD_INPUT_FIELDS = new Set(["pan", "source", "expiry", "cvv2", "cvv", "expMonth", "expYear"]);
 
-const STORED_CREDENTIAL_SCENARIO_OPTIONS = [
-  { value: "", label: "No stored credential scenario" },
-  { value: "one_time_online_purchase", label: "One-Time Online Purchase" },
-  { value: "one_time_phone_purchase", label: "One-Time Phone Purchase" },
-  { value: "one_time_phone_stored_profile", label: "One-Time Phone Purchase with Stored Profile" },
-  { value: "online_one_time_zero_auth", label: "Online One-Time $0 Authorization" },
-  { value: "online_subscription_zero_auth", label: "Online Subscription $0 Authorization" },
-  { value: "online_subscription_initial_payment", label: "Online Subscription Initial Payment" },
-  { value: "online_subscription_returning_customer", label: "Online Subscription Returning Customer" },
-  { value: "split_charge_in_stock", label: "Split Charge: In-Stock Charge" },
-  { value: "split_charge_remainder", label: "Split Charge: Remainder Charge" }
-];
-
 const CARD_PAYMENT_FIELD_CONFIG = {
   cardId: {
     label: "Saved Card",
     className: "full-span",
     type: "select",
     options: () => getSavedCardSelectOptions()
-  },
-  storedCredentialScenario: {
-    label: "Payment Scenario",
-    className: "full-span",
-    type: "select",
-    options: STORED_CREDENTIAL_SCENARIO_OPTIONS
   },
   pan: { label: "Card Number", className: "full-span", autocomplete: "off", inputmode: "numeric" },
   source: { label: "Source Token", className: "full-span", autocomplete: "off", placeholder: "Clover source token" },
@@ -223,8 +214,12 @@ const CARD_PAYMENT_FIELD_CONFIG = {
     }
   },
   cardholderName: { label: "Holder Name", className: "full-span", autocomplete: "cc-name" },
+  billingAddressLine1: { label: "Street", className: "full-span", autocomplete: "address-line1" },
+  billingCity: { label: "City", autocomplete: "address-level2" },
+  billingState: { label: "State", autocomplete: "address-level1" },
   billingZip: { label: "Billing ZIP" },
   billingCountry: { label: "Country", maxlength: "2", defaultValue: "US" },
+  addressFields: { label: "Address", className: "full-span", component: "address" },
   amount: { label: "Amount", type: "text", inputmode: "decimal", defaultValue: "1000" },
   sequenceAmount1: { label: "Request 1 Amount", type: "text", inputmode: "decimal", defaultValue: "1,100.12" },
   sequenceAmount2: { label: "Request 2 Amount", type: "text", inputmode: "decimal", defaultValue: "1,100.25" },
@@ -247,9 +242,11 @@ const CARD_PAYMENT_FIELD_CONFIG = {
   currency: { label: "Currency", maxlength: "3", defaultValue: "USD" },
   reference: { label: "Reference / Order", className: "full-span" },
   transactionId: { label: "Transaction Id", className: "full-span" },
+  authorizationPnref: { label: "Authorization PNREF", className: "full-span" },
   token: { label: "Token", className: "full-span", autocomplete: "off" },
   ip: { label: "Customer IP", placeholder: "127.0.0.1" },
   description: { label: "Description", className: "full-span" },
+  note: { label: "Note", className: "full-span" },
   captureComplete: {
     label: "Complete Capture",
     type: "select",
@@ -318,12 +315,14 @@ function setGlobalBusy(active) {
 
 function beginRequest() {
   state.pendingRequests += 1;
+  window.ActionLoader?.set(true);
   setGlobalBusy(true);
 }
 
 function endRequest() {
   state.pendingRequests = Math.max(0, state.pendingRequests - 1);
   if (state.pendingRequests === 0) {
+    window.ActionLoader?.set(false);
     setGlobalBusy(false);
   }
 }
@@ -532,6 +531,13 @@ function renderRoute() {
   }
   if (activeRoute === "payment-processors" && state.user) {
     applyPaymentProcessorRouteFilter();
+    ensureProviderDataLoaded().then(() => {
+      renderPaymentProcessorMenu();
+    }).catch((error) => {
+      if (elements.paymentProcessorOperationResult) {
+        elements.paymentProcessorOperationResult.innerHTML = `<article class="list-card"><strong>Processor Catalog Error</strong><div>${escapeHtml(error.message)}</div></article>`;
+      }
+    });
     loadPaymentProcessorLogs().catch((error) => {
       if (elements.paymentProcessorLogsList) {
         elements.paymentProcessorLogsList.innerHTML = `<article class="list-card"><strong>Processor Log Error</strong><div>${escapeHtml(error.message)}</div></article>`;
@@ -559,7 +565,7 @@ function renderRoute() {
     });
   }
   if (activeRoute === "checkers") {
-    const activeCheckerTab = document.querySelector("[data-checker-tab].active")?.dataset.checkerTab || "cards";
+    const activeCheckerTab = document.querySelector("[data-checker-tab].active")?.dataset.checkerTab || "ip";
     showCheckerTab(activeCheckerTab);
   }
   if (activeRoute === "checkers" && state.user) {
@@ -618,6 +624,18 @@ function getSelectedCardPaymentProvider() {
 function getSelectedCardPaymentMethod() {
   const provider = getSelectedCardPaymentProvider();
   const operationKey = elements.manualPaymentForm?.elements?.operation?.value;
+  return provider?.methods?.find((method) => method.key === operationKey) || provider?.methods?.[0] || null;
+}
+
+function getSelectedPaymentProcessorOperationProvider() {
+  const providerKey = elements.paymentProcessorOperationForm?.elements?.provider?.value || getPaymentProcessorRouteKey() || "propelr";
+  const catalog = getCardPaymentCatalog();
+  return catalog[providerKey] || catalog[normalizeProcessorActionProvider(providerKey)] || catalog.propelr || Object.values(catalog)[0] || null;
+}
+
+function getSelectedPaymentProcessorOperationMethod() {
+  const provider = getSelectedPaymentProcessorOperationProvider();
+  const operationKey = elements.paymentProcessorOperationForm?.elements?.operation?.value;
   return provider?.methods?.find((method) => method.key === operationKey) || provider?.methods?.[0] || null;
 }
 
@@ -723,6 +741,125 @@ function populateManualPaymentOperations({ preserve = true } = {}) {
   renderCardPaymentOperationTabs(provider, getSelectedCardPaymentMethod());
 }
 
+function populatePaymentProcessorOperationProviders({ preserve = true } = {}) {
+  const form = elements.paymentProcessorOperationForm;
+  const providerSelect = form?.elements?.provider;
+  const providers = Object.values(getCardPaymentCatalog());
+  if (!providerSelect || providers.length === 0) {
+    return;
+  }
+
+  const routeProvider = getPaymentProcessorRouteKey();
+  const previous = routeProvider || (preserve ? providerSelect.value : "");
+  providerSelect.innerHTML = providers
+    .map((provider) => `<option value="${escapeHtml(provider.key)}">${escapeHtml(provider.label || provider.key)}</option>`)
+    .join("");
+  providerSelect.value = providers.some((provider) => provider.key === previous)
+    ? previous
+    : providers[0].key;
+}
+
+function populatePaymentProcessorOperationMethods({ preserve = true } = {}) {
+  const form = elements.paymentProcessorOperationForm;
+  const operationSelect = form?.elements?.operation;
+  const provider = getSelectedPaymentProcessorOperationProvider();
+  if (!operationSelect || !provider?.methods?.length) {
+    return;
+  }
+
+  const previous = preserve ? operationSelect.value : "";
+  operationSelect.innerHTML = provider.methods
+    .map((method) => `<option value="${escapeHtml(method.key)}">${escapeHtml(method.label)}</option>`)
+    .join("");
+  operationSelect.value = provider.methods.some((method) => method.key === previous)
+    ? previous
+    : provider.methods[0].key;
+}
+
+function renderPaymentProcessorOperationFields() {
+  const target = elements.paymentProcessorOperationDynamicFields;
+  if (!target) {
+    return;
+  }
+  const form = elements.paymentProcessorOperationForm;
+  const provider = getSelectedPaymentProcessorOperationProvider();
+  const method = getSelectedPaymentProcessorOperationMethod();
+  if (!provider || !method) {
+    target.innerHTML = `<div class="summary-empty">Processor ve işlem seçimi bekleniyor.</div>`;
+    return;
+  }
+
+  const currentValues = form ? formToObject(form) : {};
+  const requiredFields = new Set(method.required || []);
+  const fields = getCardPaymentMethodFields(provider, method);
+  target.innerHTML = fields.map((name) => {
+    const config = CARD_PAYMENT_FIELD_CONFIG[name];
+    const defaultValue = typeof config.defaultValue === "function"
+      ? config.defaultValue({ provider, method })
+      : config.defaultValue;
+    const value = currentValues[name] ?? defaultValue ?? "";
+    const required = requiredFields.has(name) && name !== "cardId";
+    return renderCardPaymentInput(name, config, value, required, { provider, method });
+  }).join("");
+}
+
+function mountSharedCardComponents() {
+  if (!window.CardInputComponent) {
+    return;
+  }
+  document.querySelectorAll("[data-card-component]").forEach((target) => {
+    if (target.dataset.cardComponentMounted === "true") {
+      return;
+    }
+    const type = target.dataset.cardComponent;
+    const configs = {
+      bin: { includePan: false, includeBin: true, includeExpiry: false, includeCvv: false, includeHolder: false, includeAddress: false, binRequired: true },
+      live: { includePan: true, includeBin: false, includeExpiry: true, includeCvv: true, cvvName: "cvv2", includeHolder: true, includeAddress: true, panRequired: true },
+      balance: { includePan: true, includeBin: false, includeExpiry: true, includeCvv: false, includeHolder: true, includeAddress: true },
+      clover: { includePan: true, includeBin: true, includeExpiry: true, includeCvv: false, includeHolder: true, includeAddress: true }
+    };
+    target.innerHTML = window.CardInputComponent.renderCardFields(configs[type] || {});
+    target.dataset.cardComponentMounted = "true";
+  });
+}
+
+function syncPaymentProcessorOperationForm({ preserve = true } = {}) {
+  populatePaymentProcessorOperationProviders({ preserve });
+  populatePaymentProcessorOperationMethods({ preserve });
+  renderPaymentProcessorOperationFields();
+}
+
+function openPaymentProcessorOperation(providerKey, methodKey) {
+  const form = elements.paymentProcessorOperationForm;
+  if (!form || !elements.paymentProcessorOperationPanel) {
+    return;
+  }
+  elements.paymentProcessorOperationPanel.hidden = false;
+  syncPaymentProcessorOperationForm({ preserve: true });
+  if (providerKey && form.elements.provider) {
+    form.elements.provider.value = providerKey;
+    populatePaymentProcessorOperationMethods({ preserve: false });
+  }
+  if (methodKey && form.elements.operation) {
+    form.elements.operation.value = methodKey;
+  }
+  renderPaymentProcessorOperationFields();
+  if (elements.paymentProcessorOperationResult) {
+    elements.paymentProcessorOperationResult.innerHTML = "";
+  }
+  elements.paymentProcessorOperationPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closePaymentProcessorOperation() {
+  if (!elements.paymentProcessorOperationPanel) {
+    return;
+  }
+  elements.paymentProcessorOperationPanel.hidden = true;
+  if (elements.paymentProcessorOperationResult) {
+    elements.paymentProcessorOperationResult.innerHTML = "";
+  }
+}
+
 function renderCardPaymentOperationTabs(provider, method) {
   if (!elements.cardPaymentOperationTabs) {
     return;
@@ -783,7 +920,6 @@ function getCardPaymentMethodFields(provider, method) {
   const values = [];
   if (hasCardInput) {
     values.push("cardId");
-    values.push("storedCredentialScenario");
   }
   fields.forEach((name) => {
     if (CARD_PAYMENT_FIELD_CONFIG[name] && !values.includes(name)) {
@@ -791,7 +927,7 @@ function getCardPaymentMethodFields(provider, method) {
     }
   });
   if (hasCardInput && !fields.includes("source")) {
-    ["cardholderName", "billingZip", "billingCountry"].forEach((name) => {
+    ["cardholderName", "addressFields"].forEach((name) => {
       if (!values.includes(name)) {
         values.push(name);
       }
@@ -807,6 +943,25 @@ function getCardPaymentMethodFields(provider, method) {
 }
 
 function renderCardPaymentInput(name, config, value, required, context = {}) {
+  if (config.component === "address") {
+    return window.CardInputComponent?.renderAddressFields({ open: false }) || "";
+  }
+  if (window.CardInputComponent && name === "expMonth") {
+    return `
+      <label${config.className ? ` class="${escapeHtml(config.className)}"` : ""}>
+        <span>${escapeHtml(config.label)}</span>
+        <select name="expMonth" ${required ? "required" : ""}>${window.CardInputComponent.monthOptions(value)}</select>
+      </label>
+    `;
+  }
+  if (window.CardInputComponent && name === "expYear") {
+    return `
+      <label${config.className ? ` class="${escapeHtml(config.className)}"` : ""}>
+        <span>${escapeHtml(config.label)}</span>
+        <select name="expYear" ${required ? "required" : ""}>${window.CardInputComponent.yearOptions(value)}</select>
+      </label>
+    `;
+  }
   const labelClass = config.className ? ` class="${escapeHtml(config.className)}"` : "";
   const attrs = [
     `name="${escapeHtml(name)}"`,
@@ -880,19 +1035,6 @@ function renderCardPaymentDynamicFields(provider, method) {
     amount.placeholder = provider.key === "propelr" ? "1100.12" : "1000";
   }
   syncManualPaymentCardSearch();
-  applyStoredCredentialScenarioDefaults();
-}
-
-function applyStoredCredentialScenarioDefaults() {
-  const form = elements.manualPaymentForm;
-  const scenario = form?.elements?.storedCredentialScenario?.value || "";
-  const amount = form?.elements?.amount;
-  if (!amount) {
-    return;
-  }
-  if (["online_one_time_zero_auth", "online_subscription_zero_auth"].includes(scenario)) {
-    amount.value = "0.00";
-  }
 }
 
 function formatProviderGroupLabel(group) {
@@ -1065,6 +1207,12 @@ function applyPaymentProcessorRouteFilter() {
   if (processor && select && select.value !== processor) {
     select.value = processor;
   }
+  const operationProvider = elements.paymentProcessorOperationForm?.elements?.provider;
+  if (processor && operationProvider && !elements.paymentProcessorOperationPanel?.hidden && operationProvider.value !== processor) {
+    operationProvider.value = processor;
+    populatePaymentProcessorOperationMethods({ preserve: false });
+    renderPaymentProcessorOperationFields();
+  }
 }
 
 function getPaymentProcessorFilters() {
@@ -1153,16 +1301,31 @@ function renderPaymentProcessorMenu() {
   }
   const processors = state.paymentProcessorLogs?.processors || [];
   const selected = elements.paymentProcessorFilterForm?.elements?.processor?.value || getPaymentProcessorRouteKey();
-  elements.paymentProcessorMenu.innerHTML = processors.length
-    ? processors.map((processor) => `
-      <a href="#/payment-processors/${encodeURIComponent(processor.key)}" class="${processor.key === selected ? "active" : ""}">
-        <span class="processor-health-dot ${getProcessorHealthClass(processor.health)}" data-processor-health="${escapeHtml(processor.key)}"></span>
-        <strong>${escapeHtml(processor.label || processor.key)}</strong>
-        <span class="status-pill ${getProcessorHealthPillClass(processor.health, processor.configured)}">${escapeHtml(getProcessorHealthLabel(processor.health, processor.configured))}</span>
-      </a>
-    `).join("")
-    : `<article class="list-card">Processor list loading.</article>`;
+  elements.paymentProcessorMenu.innerHTML = window.PaymentProcessorListComponent?.render({
+    processors,
+    selected,
+    healthClass: getProcessorHealthClass,
+    healthPillClass: getProcessorHealthPillClass,
+    healthLabel: getProcessorHealthLabel,
+    actionRenderer: renderPaymentProcessorOperationButtons
+  }) || `<article class="list-card">Processor list loading.</article>`;
   renderProcessorHealthDots();
+}
+
+function renderPaymentProcessorOperationButtons(processorKey) {
+  const provider = getCardPaymentCatalog()[processorKey] || getCardPaymentCatalog()[normalizeProcessorActionProvider(processorKey)];
+  const methods = provider?.methods || [];
+  if (!methods.length) {
+    return `<span class="muted">İşlem yok</span>`;
+  }
+  return methods.map((method) => `
+    <button
+      type="button"
+      class="ghost small"
+      data-payment-processor-new-operation="${escapeHtml(method.key)}"
+      data-payment-processor-provider="${escapeHtml(provider.key)}"
+    >${escapeHtml(method.label || method.key)}</button>
+  `).join("");
 }
 
 function getProcessorHealth(keyOrProcessor) {
@@ -1295,10 +1458,81 @@ function hasJsonModelValue(value) {
   return true;
 }
 
+function getPaymentProcessorLogKey(log) {
+  return String(log.id || `${log.processor || log.provider || "processor"}-${log.created_at || Date.now()}`);
+}
+
+function getProcessorTransactionId(log) {
+  return log.provider_reference_id ||
+    log.transactionId ||
+    log.responseModel?.transactionId ||
+    log.responseModel?.result?.transactionId ||
+    log.responseModel?.result?.retref ||
+    log.responseModel?.result?.cloverChargeId ||
+    log.responseModel?.providerResponse?.transactionId ||
+    log.responseModel?.providerResponse?.retref ||
+    log.raw_response?.result?.transactionId ||
+    log.raw_response?.result?.retref ||
+    log.raw_response?.result?.cloverChargeId ||
+    log.raw_response?.providerResponse?.transactionId ||
+    log.raw_response?.providerResponse?.retref ||
+    log.raw_response?.request?.transactionId ||
+    log.raw_response?.request?.retref ||
+    log.requestModel?.transactionId ||
+    log.requestModel?.retref ||
+    null;
+}
+
+function normalizeProcessorActionProvider(value) {
+  const provider = String(value || "").toLowerCase();
+  if (provider === "propelr" || provider === "propelrpay") {
+    return "propelrpay";
+  }
+  if (provider === "globalpayments" || provider === "global-payments" || provider === "portico") {
+    return "globalpayments";
+  }
+  return provider;
+}
+
+function canRunProcessorRowAction(log) {
+  const provider = normalizeProcessorActionProvider(log.processor || log.provider);
+  return Boolean(getProcessorTransactionId(log) && ["propelrpay", "fluidpay", "globalpayments", "paypal"].includes(provider));
+}
+
+function renderProcessorRowActions(log, logKey) {
+  if (!canRunProcessorRowAction(log)) {
+    const provider = normalizeProcessorActionProvider(log.processor || log.provider);
+    if (!["propelrpay", "fluidpay", "globalpayments", "paypal"].includes(provider)) {
+      return `<span class="muted">Destek yok</span>`;
+    }
+    return `<span class="muted">Transaction yok</span>`;
+  }
+  const provider = normalizeProcessorActionProvider(log.processor || log.provider);
+  const actions = provider === "paypal" ? [
+    { key: "void", label: "İptal" },
+    { key: "capture", label: "Capture" }
+  ] : [
+    { key: "void", label: "İptal" },
+    { key: "refund", label: "İade" },
+    { key: "capture", label: "Capture" },
+    { key: "capture_tip", label: "Tip + Capture" }
+  ];
+  return `
+    <div class="processor-row-actions">
+      ${actions.map((action) => `
+        <button type="button" class="ghost small" data-processor-action="${escapeHtml(action.key)}" data-processor-log-id="${escapeHtml(logKey)}">${escapeHtml(action.label)}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderPaymentProcessorLog(log) {
   const canViewJsonModels = state.paymentProcessorLogs?.canViewJsonModels === true && state.user?.role === "admin";
-  const requestId = `request-${log.id || `${log.processor}-${log.created_at}`}`;
-  const responseId = `response-${log.id || `${log.processor}-${log.created_at}`}`;
+  const logKey = getPaymentProcessorLogKey(log);
+  const requestId = `request-${logKey}`;
+  const responseId = `response-${logKey}`;
+  const transactionId = getProcessorTransactionId(log);
+  state.paymentProcessorLogById[logKey] = log;
   if (canViewJsonModels) {
     state.paymentProcessorJsonModels[requestId] = log.requestModel || {};
     state.paymentProcessorJsonModels[responseId] = log.responseModel || {};
@@ -1313,8 +1547,10 @@ function renderPaymentProcessorLog(log) {
       </td>
       <td>${escapeHtml(formatMoneyForDisplay(log.amount))}</td>
       <td>${escapeHtml(log.card?.maskedPan || "-")}</td>
+      <td class="processor-transaction-id">${escapeHtml(transactionId || "-")}</td>
       <td>${escapeHtml(log.actor?.displayName || log.actor?.username || log.created_by_user_id || "-")}</td>
       <td><span class="status-pill ${statusClass(log.status)}">${escapeHtml(log.status || "-")}</span></td>
+      <td class="processor-table-actions">${renderProcessorRowActions(log, logKey)}</td>
       ${canViewJsonModels ? `
       <td class="processor-table-action">
         <button type="button" class="ghost small" data-json-modal="${escapeHtml(requestId)}" data-json-title="Request JSON" ${hasRequest ? "" : "disabled"}>Request</button>
@@ -1337,6 +1573,7 @@ function renderPaymentProcessorLogs() {
   const logs = state.paymentProcessorLogs?.logs || [];
   const canViewJsonModels = state.paymentProcessorLogs?.canViewJsonModels === true && state.user?.role === "admin";
   state.paymentProcessorJsonModels = {};
+  state.paymentProcessorLogById = {};
   elements.paymentProcessorLogsList.innerHTML = logs.length
     ? `
       <table class="processor-table">
@@ -1344,8 +1581,10 @@ function renderPaymentProcessorLogs() {
           <col>
           <col>
           <col>
+          <col class="processor-transaction-col">
           <col>
           <col>
+          <col class="processor-actions-col">
           ${canViewJsonModels ? `
           <col class="processor-action-col">
           <col class="processor-action-col">
@@ -1356,8 +1595,10 @@ function renderPaymentProcessorLogs() {
             <th>İşlem</th>
             <th>Miktar</th>
             <th>Kart</th>
+            <th>Transaction Id</th>
             <th>İşlemi Yapan</th>
             <th>Status</th>
+            <th>Actions</th>
             ${canViewJsonModels ? `
             <th>Request</th>
             <th>Response</th>
@@ -1680,6 +1921,210 @@ function openModal({ eyebrow = "History", title = "Card History", body = "" }) {
 function closeModal() {
   elements.modalOverlay.hidden = true;
   elements.modalBody.innerHTML = "";
+}
+
+function getProcessorActionConfig(action) {
+  const configs = {
+    void: {
+      title: "İşlemi İptal Et",
+      operation: "void",
+      submitLabel: "İptal Et",
+      amount: false,
+      tip: false
+    },
+    refund: {
+      title: "İade Oluştur",
+      operation: "refund",
+      submitLabel: "İade Et",
+      amount: true,
+      amountLabel: "İade Miktarı",
+      amountRequired: true,
+      tip: false
+    },
+    capture: {
+      title: "Provizyonu Capture Et",
+      operation: "capture",
+      submitLabel: "Capture",
+      amount: true,
+      amountLabel: "Capture Miktarı",
+      amountRequired: false,
+      tip: false
+    },
+    capture_tip: {
+      title: "Tip ile Capture Et",
+      operation: "capture",
+      submitLabel: "Tip + Capture",
+      amount: true,
+      amountLabel: "Capture Miktarı",
+      amountRequired: false,
+      tip: true
+    }
+  };
+  return configs[action] || null;
+}
+
+function openProcessorActionModal(log, action) {
+  const config = getProcessorActionConfig(action);
+  const transactionId = getProcessorTransactionId(log);
+  const provider = normalizeProcessorActionProvider(log.processor || log.provider);
+  if (!config || !transactionId || !provider) {
+    return;
+  }
+  const displayAmount = formatMoneyForDisplay(log.amount);
+  openModal({
+    eyebrow: "Processor Action",
+    title: config.title,
+    body: `
+      <form id="processorActionForm" class="processor-action-form">
+        <input type="hidden" name="provider" value="${escapeHtml(provider)}">
+        <input type="hidden" name="operation" value="${escapeHtml(config.operation)}">
+        <input type="hidden" name="transactionId" value="${escapeHtml(transactionId)}">
+        <input type="hidden" name="retref" value="${escapeHtml(transactionId)}">
+        <input type="hidden" name="currency" value="${escapeHtml(log.currency || "USD")}">
+        ${log.card_id || log.cardId ? `<input type="hidden" name="cardId" value="${escapeHtml(log.card_id || log.cardId)}">` : ""}
+        <div class="processor-action-summary">
+          <div><span>Provider</span><strong>${escapeHtml(provider)}</strong></div>
+          <div><span>İşlem</span><strong>${escapeHtml(log.attempt_type || "-")}</strong></div>
+          <div><span>Transaction</span><strong>${escapeHtml(transactionId)}</strong></div>
+          <div><span>Mevcut Miktar</span><strong>${escapeHtml(displayAmount)}</strong></div>
+        </div>
+        <div class="processor-action-fields">
+          ${config.amount ? `
+            <label>
+              <span>${escapeHtml(config.amountLabel || "Miktar")}</span>
+              <input name="amount" inputmode="decimal" data-money-format value="${escapeHtml(log.amount ?? "")}" ${config.amountRequired ? "required" : ""}>
+            </label>
+          ` : ""}
+          ${config.tip ? `
+            <label>
+              <span>Tip Miktarı</span>
+              <input name="gratuityAmount" inputmode="decimal" data-money-format value="">
+            </label>
+          ` : ""}
+        </div>
+        <div class="form-actions">
+          <button type="button" class="ghost" data-modal-close>Vazgeç</button>
+          <button type="submit">${escapeHtml(config.submitLabel)}</button>
+        </div>
+      </form>
+    `
+  });
+}
+
+async function submitProcessorAction(form) {
+  const payload = removeEmptyFields(formToObject(form));
+  if (payload.amount) {
+    payload.amount = String(payload.amount).replace(/,/g, "");
+  }
+  if (payload.gratuityAmount) {
+    payload.gratuityAmount = String(payload.gratuityAmount).replace(/,/g, "");
+  }
+  let result;
+  if (payload.provider === "paypal" && payload.operation === "capture") {
+    payload.authorizationPnref = payload.transactionId || payload.retref;
+    result = await api("/providers/paypal/manager/cards/capture", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  } else if (payload.provider === "paypal" && payload.operation === "void") {
+    payload.authorizationPnref = payload.transactionId || payload.retref;
+    result = await api("/providers/paypal/direct-payment/cards/void", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  } else {
+    result = await api("/provider-operations/cards", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+  await loadPaymentProcessorLogs();
+  await loadProviderReports();
+  openJsonModal("Processor Action Result", result);
+}
+
+async function submitPaymentProcessorOperationForm(form) {
+  const payload = applySelectedCardPayload(
+    form,
+    removeEmptyFields(formToObject(form))
+  );
+  const selectedMethod = getSelectedPaymentProcessorOperationMethod();
+  const selectedMethodKey = payload.operation;
+  const isPropelr = payload.provider === "propelr" || payload.provider === "propelrpay";
+  const isPayPal = payload.provider === "paypal";
+  const isPropelrSequence = isPropelr && selectedMethodKey === "amount_sequence";
+  const isTransactionDetail = isPropelr && selectedMethodKey === "transaction_detail";
+
+  if (selectedMethod?.operation) {
+    payload.operation = selectedMethod.operation;
+  }
+  if (payload.amount && !isPropelr) {
+    payload.amount = Number(String(payload.amount).replace(/,/g, ""));
+  }
+  if (!payload.bin && payload.pan) {
+    payload.bin = String(payload.pan).replace(/\D/g, "").slice(0, 6);
+  }
+  if (!payload.reference && !isPropelr) {
+    payload.reference = `processor-${payload.provider}-${Date.now()}`;
+  }
+  if (isPropelr) {
+    if (isPropelrSequence) {
+      payload.amounts = [payload.sequenceAmount1 || "1,100.12", payload.sequenceAmount2 || "1,100.25"];
+      delete payload.amount;
+    }
+    delete payload.sequenceAmount1;
+    delete payload.sequenceAmount2;
+  }
+  const actionComponent = window.PaymentProcessorActionComponents?.[normalizeProcessorActionProvider(payload.provider)];
+  if (actionComponent?.normalizePayload) {
+    actionComponent.normalizePayload(payload);
+  }
+
+  let result;
+  if (isPayPal && selectedMethodKey === "sale") {
+    result = await api("/providers/paypal/direct-payment/cards/sale", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "PayPal Sale", result);
+  } else if (isPayPal && selectedMethodKey === "auth") {
+    result = await api("/providers/paypal/manager/cards/auth", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "PayPal Authorize", result);
+  } else if (isPayPal && selectedMethodKey === "capture") {
+    result = await api("/providers/paypal/manager/cards/capture", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "PayPal Capture", result);
+  } else if (isPayPal && selectedMethodKey === "void") {
+    result = await api("/providers/paypal/direct-payment/cards/void", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "PayPal Void", result);
+  } else if (isPropelrSequence) {
+    result = await api("/providers/propelr/amount-sequence", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "Propelr 2 Request", result);
+  } else if (isTransactionDetail) {
+    result = await api(`/providers/propelr/transactions/${encodeURIComponent(payload.transactionId)}`);
+    renderGenericProviderResult(elements.paymentProcessorOperationResult, "Propelr Transaction Detail", result);
+  } else {
+    result = await api("/provider-operations/cards", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderProviderOperationResult(result, elements.paymentProcessorOperationResult);
+  }
+
+  await loadPaymentProcessorLogs();
+  await loadProviderReports();
+  return result;
 }
 
 function enrollmentButtonLabel(card) {
@@ -2017,6 +2462,7 @@ function fillCardDrivenForms(card) {
     elements.providerOperationForm,
     elements.paypalBinCheckForm,
     elements.paypalLiveCheckForm,
+    elements.balanceCheckForm,
     elements.paypalSaleForm,
     elements.paypalAuthForm,
     elements.paypalCaptureForm,
@@ -2055,6 +2501,9 @@ function fillTransactionFormFromCard(form, card) {
   assignFormValue(form, "bin", card.first6);
   assignFormValue(form, "firstName", nameParts[0]);
   assignFormValue(form, "lastName", nameParts.slice(1).join(" "));
+  assignFormValue(form, "billingAddressLine1", card.billing_address_line1);
+  assignFormValue(form, "billingCity", card.billing_city);
+  assignFormValue(form, "billingState", card.billing_state);
   assignFormValue(form, "street", card.billing_address_line1);
   assignFormValue(form, "city", card.billing_city);
   assignFormValue(form, "state", card.billing_state);
@@ -2263,15 +2712,92 @@ function renderBinCheckResult(result, target = elements.paypalBinCheckResult) {
   const ipDetails = result?.ipDetails || null;
 
   target.innerHTML = `
+    ${renderCardIntelligenceLayout({
+      title: "BIN/IIN Result",
+      status: result?.status,
+      bin: result?.bin,
+      ip: result?.ip,
+      details,
+      ipDetails
+    })}
+  `;
+}
+
+function pickDetail(details, keys) {
+  for (const key of keys) {
+    if (details?.[key] !== undefined && details?.[key] !== null && details?.[key] !== "" && details?.[key] !== "API Only") {
+      return details[key];
+    }
+  }
+  return null;
+}
+
+function renderCardIntelligenceLayout({ title, status, bin, ip, details = {}, ipDetails = {}, live = null } = {}) {
+  return `
     <article class="list-card bin-result">
-      <strong>BIN/IIN Result</strong>
+      <div class="pretty-message-head">
+        <strong>${escapeHtml(title || "Card Intelligence")}</strong>
+        <span class="status-pill ${statusClass(status)}">${escapeHtml(status || "-")}</span>
+      </div>
+      <div class="summary-grid card-intelligence-summary">
+        <div><span>BIN/IIN</span><strong>${escapeHtml(bin || details["BIN/IIN"] || "-")}</strong></div>
+        <div><span>Banka</span><strong>${escapeHtml(pickDetail(details, ["Issuer Name / Bank"]) || "-")}</strong></div>
+        <div><span>Scheme</span><strong>${escapeHtml(pickDetail(details, ["Card Scheme"]) || "-")}</strong></div>
+        <div><span>Brand</span><strong>${escapeHtml(pickDetail(details, ["Card Brand"]) || "-")}</strong></div>
+        <div><span>Tip</span><strong>${escapeHtml(pickDetail(details, ["Card Type"]) || "-")}</strong></div>
+        <div><span>Seviye</span><strong>${escapeHtml(pickDetail(details, ["Card Level"]) || "-")}</strong></div>
+        <div><span>Ülke</span><strong>${escapeHtml(pickDetail(details, ["ISO Country Name", "ISO Country Code A2"]) || "-")}</strong></div>
+        <div><span>Currency</span><strong>${escapeHtml(pickDetail(details, ["Card Currency", "ISO Country Currency"]) || "-")}</strong></div>
+        <div><span>Commercial</span><strong>${escapeHtml(pickDetail(details, ["Commercial Card?"]) || "-")}</strong></div>
+        <div><span>Prepaid</span><strong>${escapeHtml(pickDetail(details, ["Prepaid Card?"]) || "-")}</strong></div>
+        ${live ? `
+          <div><span>Live Result</span><strong>${escapeHtml(live.status || "-")}</strong></div>
+          <div><span>Provider Message</span><strong>${escapeHtml(live.responseMessage || "-")}</strong></div>
+        ` : ""}
+      </div>
+      <strong class="result-subtitle">Kart / BIN Detayları</strong>
       ${renderKeyValueDetails(details)}
-      ${ipDetails ? `
-        <strong class="result-subtitle">IP Check</strong>
+      ${ip || Object.keys(ipDetails || {}).length ? `
+        <strong class="result-subtitle">IP Detayları</strong>
         ${renderKeyValueDetails(ipDetails)}
       ` : ""}
-      <pre>${escapeHtml(JSON.stringify({ status: result.status, bin: result.bin, ip: result.ip, source: result.source }, null, 2))}</pre>
     </article>
+  `;
+}
+
+function renderLiveAndBinCheckResult({ live, binCheck }, target = elements.paypalLiveCheckResult) {
+  const details = binCheck?.details || {};
+  const ipDetails = binCheck?.ipDetails || null;
+  target.innerHTML = `
+    <article class="list-card pretty-message ${statusClass(live?.status)}">
+      <div class="pretty-message-head">
+        <strong>Live Check</strong>
+        <span class="status-pill ${statusClass(live?.status)}">${escapeHtml(live?.status || "-")}</span>
+      </div>
+      ${renderKeyValueDetails({
+        "Result Code": live?.resultCode,
+        "Response Message": live?.responseMessage,
+        "PNREF": live?.pnref,
+        "Auth Code": live?.authCode,
+        "AVS Address": live?.avsAddress,
+        "AVS ZIP": live?.avsZip,
+        "CVV Match": live?.cvv2Match,
+        "Amount": live?.amount,
+        "Card": live?.card?.maskedPan,
+        "Brand": live?.card?.brand,
+        "First6": live?.card?.first6,
+        "Last4": live?.card?.last4
+      })}
+    </article>
+    ${renderCardIntelligenceLayout({
+      title: "Live Check ile Gelen BIN Detayları",
+      status: binCheck?.status,
+      bin: binCheck?.bin,
+      ip: binCheck?.ip,
+      details,
+      ipDetails,
+      live
+    })}
   `;
 }
 
@@ -2365,7 +2891,6 @@ function renderProviderOperationResult(result, target = elements.providerOperati
         "Transaction Id": providerResult.transactionId || providerResult.cloverChargeId,
         "Auth Code": providerResult.authCode,
         "Result Code": result?.resultCode || providerResult.resultCode,
-        "Payment Scenario": providerResult.storedCredential?.label || providerResult.storedCredential?.scenario,
         "COF": providerResult.storedCredential?.cof,
         "Scheduled": providerResult.storedCredential?.cofscheduled,
         "Ecom Ind": providerResult.storedCredential?.ecomind,
@@ -2737,6 +3262,7 @@ async function loadProviderData() {
   populateManualPaymentProviders({ preserve: true });
   populateManualPaymentOperations({ preserve: true });
   syncManualPaymentMode();
+  syncPaymentProcessorOperationForm({ preserve: true });
 }
 
 async function loadCards() {
@@ -2862,15 +3388,73 @@ elements.paymentProcessorLogsRefresh?.addEventListener("click", async () => {
 });
 
 elements.paymentProcessorLogsList?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-json-modal]");
+  const jsonButton = event.target.closest("[data-json-modal]");
+  if (jsonButton) {
+    if (state.user?.role !== "admin" || state.paymentProcessorLogs?.canViewJsonModels !== true) {
+      return;
+    }
+    const modelId = jsonButton.dataset.jsonModal;
+    openJsonModal(jsonButton.dataset.jsonTitle || "JSON", state.paymentProcessorJsonModels[modelId] || {});
+    return;
+  }
+
+  const actionButton = event.target.closest("[data-processor-action]");
+  if (actionButton) {
+    const log = state.paymentProcessorLogById[actionButton.dataset.processorLogId];
+    if (!log || !canRunProcessorRowAction(log)) {
+      return;
+    }
+    openProcessorActionModal(log, actionButton.dataset.processorAction);
+  }
+});
+
+elements.paymentProcessorMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-payment-processor-new-operation]");
   if (!button) {
     return;
   }
-  if (state.user?.role !== "admin" || state.paymentProcessorLogs?.canViewJsonModels !== true) {
+  event.preventDefault();
+  openPaymentProcessorOperation(button.dataset.paymentProcessorProvider, button.dataset.paymentProcessorNewOperation);
+});
+
+elements.paymentProcessorOperationClose?.addEventListener("click", closePaymentProcessorOperation);
+
+elements.paymentProcessorOperationForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await submitPaymentProcessorOperationForm(elements.paymentProcessorOperationForm);
+  } catch (error) {
+    const payload = errorResponsePayload(error);
+    if (payload?.provider || payload?.operationId) {
+      renderProviderOperationResult(payload, elements.paymentProcessorOperationResult);
+    } else {
+      renderGenericProviderResult(elements.paymentProcessorOperationResult, "Processor Operation Error", payload);
+    }
+  }
+});
+
+elements.paymentProcessorOperationForm?.addEventListener("change", (event) => {
+  if (event.target?.name === "provider") {
+    populatePaymentProcessorOperationMethods({ preserve: false });
+    renderPaymentProcessorOperationFields();
     return;
   }
-  const modelId = button.dataset.jsonModal;
-  openJsonModal(button.dataset.jsonTitle || "JSON", state.paymentProcessorJsonModels[modelId] || {});
+  if (event.target?.name === "operation") {
+    renderPaymentProcessorOperationFields();
+    return;
+  }
+  if (event.target?.name === "cardId") {
+    const card = state.cards.find((item) => item.id === event.target.value);
+    if (card) {
+      fillTransactionFormFromCard(elements.paymentProcessorOperationForm, card);
+    }
+  }
+});
+
+elements.paymentProcessorOperationForm?.addEventListener("input", (event) => {
+  if (event.target?.matches("[data-money-format]")) {
+    formatProcessorMoneyInput(event.target);
+  }
 });
 
 elements.cardPaymentReportsRefresh?.addEventListener("click", async () => {
@@ -3100,6 +3684,53 @@ elements.modalOverlay?.addEventListener("click", (event) => {
     closeModal();
   }
 });
+elements.modalBody?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-modal-close]")) {
+    closeModal();
+  }
+});
+elements.modalBody?.addEventListener("input", (event) => {
+  if (event.target?.matches("[data-money-format]")) {
+    formatProcessorMoneyInput(event.target);
+  }
+});
+elements.modalBody?.addEventListener("submit", async (event) => {
+  if (event.target?.id !== "processorActionForm") {
+    return;
+  }
+  event.preventDefault();
+  try {
+    await submitProcessorAction(event.target);
+  } catch (error) {
+    const payload = errorResponsePayload(error);
+    openJsonModal("Processor Action Error", payload);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-address-toggle]");
+  if (!button) {
+    return;
+  }
+  const block = button.closest(".shared-address-block");
+  const fields = block?.querySelector("[data-address-fields]");
+  if (!fields) {
+    return;
+  }
+  fields.hidden = !fields.hidden;
+  button.textContent = fields.hidden ? "Adres Bilgisi Ekle" : "Adres Bilgisi Kapat";
+});
+document.addEventListener("input", (event) => {
+  if (event.target?.matches("[data-money-format]")) {
+    formatProcessorMoneyInput(event.target);
+  }
+  if (event.target?.matches("[data-card-number]")) {
+    event.target.value = String(event.target.value || "").replace(/\D/g, "").replace(/(.{4})/g, "$1 ").trim();
+  }
+  if (event.target?.matches("[data-bin-input]")) {
+    event.target.value = String(event.target.value || "").replace(/\D/g, "").slice(0, 6);
+  }
+});
 
 elements.cardForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3300,6 +3931,22 @@ elements.paypalNvpTestButton?.addEventListener("click", async () => {
   }
 });
 
+elements.ipLookupForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = removeEmptyFields(formToObject(elements.ipLookupForm));
+
+  try {
+    const result = await api("/providers/paypal/manager/cards/bin-check", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderBinCheckResult(result, elements.ipLookupResult);
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.ipLookupResult, "IP Lookup Error", { error: error.message });
+  }
+});
+
 elements.paypalManagerInquiryForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = formToObject(elements.paypalManagerInquiryForm);
@@ -3339,6 +3986,31 @@ elements.paypalBinCheckForm?.addEventListener("submit", async (event) => {
     await loadAuditLogs();
   } catch (error) {
     renderGenericProviderResult(elements.paypalBinCheckResult, "RapidAPI BIN Check Error", { error: error.message });
+  }
+});
+
+elements.balanceCheckForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = applySelectedCardPayload(
+    elements.balanceCheckForm,
+    removeEmptyFields(formToObject(elements.balanceCheckForm)),
+    { includeBilling: false }
+  );
+  payload.amount = payload.amount ? Number(String(payload.amount).replace(/,/g, "")) : undefined;
+  payload.balanceAmount = payload.balanceAmount ? Number(String(payload.balanceAmount).replace(/,/g, "")) : undefined;
+
+  try {
+    const result = await api("/checkers/balance", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderGenericProviderResult(elements.balanceCheckResult, "Balance Check", result);
+    if (payload.cardId) {
+      await refreshCardChecks(payload.cardId);
+    }
+    await loadAuditLogs();
+  } catch (error) {
+    renderGenericProviderResult(elements.balanceCheckResult, "Balance Check Error", { error: error.message });
   }
 });
 
@@ -3423,7 +4095,7 @@ elements.manualPaymentForm?.addEventListener("submit", async (event) => {
     payload.operation = selectedMethod.operation;
   }
   if (payload.amount && !isPropelr) {
-    payload.amount = Number(payload.amount);
+    payload.amount = Number(String(payload.amount).replace(/,/g, ""));
   }
   if (payload.balanceAmount) {
     payload.balanceAmount = Number(payload.balanceAmount);
@@ -3525,21 +4197,17 @@ elements.manualPaymentForm?.addEventListener("input", (event) => {
   if (event.target?.name === "cardId") {
     syncManualPaymentCardSearch();
   }
-  if (event.target?.name === "storedCredentialScenario") {
-    applyStoredCredentialScenarioDefaults();
-  }
 });
 elements.manualPaymentForm?.addEventListener("change", (event) => {
   if (event.target?.name === "cardId") {
     syncManualPaymentCardSearch();
   }
-  if (event.target?.name === "storedCredentialScenario") {
-    applyStoredCredentialScenarioDefaults();
-  }
 });
 populateManualPaymentProviders({ preserve: true });
 populateManualPaymentOperations({ preserve: true });
+mountSharedCardComponents();
 syncManualPaymentMode();
+syncPaymentProcessorOperationForm({ preserve: true });
 renderManualPaymentSummary(null);
 
 elements.cloverIframeInitButton?.addEventListener("click", async () => {
@@ -3614,14 +4282,25 @@ elements.paypalLiveCheckForm?.addEventListener("submit", async (event) => {
     elements.paypalLiveCheckForm,
     removeEmptyFields(formToObject(elements.paypalLiveCheckForm))
   );
-  payload.amount = Number(payload.amount || 0);
+  payload.amount = Number(String(payload.amount || 0).replace(/,/g, ""));
+  if (!payload.bin && payload.first6) {
+    payload.bin = payload.first6;
+  }
 
   try {
-    const result = await api("/providers/paypal/manager/cards/live-check", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    renderGenericProviderResult(elements.paypalLiveCheckResult, "PayPal Live Check", result);
+    const [liveResult, binResult] = await Promise.allSettled([
+      api("/providers/paypal/manager/cards/live-check", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+      api("/providers/paypal/manager/cards/bin-check", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      })
+    ]);
+    const live = liveResult.status === "fulfilled" ? liveResult.value : errorResponsePayload(liveResult.reason);
+    const binCheck = binResult.status === "fulfilled" ? binResult.value : errorResponsePayload(binResult.reason);
+    renderLiveAndBinCheckResult({ live, binCheck });
     if (payload.cardId) {
       await refreshCardChecks(payload.cardId);
     }
@@ -3797,6 +4476,9 @@ elements.cardsTableBody.addEventListener("click", async (event) => {
   }
   if (elements.paypalLiveCheckForm?.elements?.cardId) {
     elements.paypalLiveCheckForm.elements.cardId.value = cardId;
+  }
+  if (elements.balanceCheckForm?.elements?.cardId) {
+    elements.balanceCheckForm.elements.cardId.value = cardId;
   }
   if (elements.paypalSaleForm?.elements?.cardId) {
     elements.paypalSaleForm.elements.cardId.value = cardId;

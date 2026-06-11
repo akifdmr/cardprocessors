@@ -4,14 +4,16 @@ const path = require("path");
 const swaggerUi = require("swagger-ui-express");
 const { v4: uuidv4 } = require("uuid");
 const env = require("./config/env");
-const { query, db } = require("./db");
+const { query, db, getMongoStatus } = require("./db");
 const { encrypt, decrypt } = require("./crypto");
 const { getPublicProviderConfig } = require("./providers");
 const { validateCardInput } = require("./services/cardValidationService");
 const { listAuditLogs, writeAuditLog } = require("./services/auditService");
 const cloverService = require("./services/cloverService");
-const cloverLearningService = require("./services/cloverLearningService");
 const fluidpayService = require("./services/fluidpayService");
+const braintreeService = require("./services/braintreeService");
+const nmiService = require("./services/nmiService");
+const zohoPaymentsService = require("./services/zohoPaymentsService");
 const globalPaymentsService = require("./services/globalPaymentsService");
 const propelrPayService = require("./services/propelrPayService");
 const paypalService = require("./services/paypalService");
@@ -24,6 +26,7 @@ const { getProviderMessage, isAxiosError, toSafeErrorLog } = require("./utils/er
 const maskRoutes = require("./routers/maskRoutes");
 const numberRoutes = require("./routers/numberRoutes");
 const callRoutes = require("./routers/callRoutes");
+const { createCloverLearningRouter } = require("./api/clover/learning/routes");
 const {
   SESSION_COOKIE_NAME,
   authenticate,
@@ -39,7 +42,36 @@ const app = express();
 burpSuiteService.installBurpSuiteIntegration();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(express.static(path.resolve(process.cwd(), "public")));
+app.use(express.static(path.resolve(process.cwd(), "public"), { index: false }));
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  const shouldAudit = req.path.startsWith("/api/") &&
+    !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+    !req.path.startsWith("/api/auth/");
+
+  if (shouldAudit) {
+    res.on("finish", () => {
+      if (!req.user?.id) return;
+      writeAuditLog({
+        entityType: "api_request",
+        entityId: req.path,
+        action: `${req.method} ${req.path}`,
+        status: res.statusCode >= 200 && res.statusCode < 400 ? "success" : "failed",
+        actorUserId: req.user.id,
+        details: redactSensitiveReportData({
+          method: req.method,
+          path: req.path,
+          query: req.query || {},
+          body: req.body || {},
+          statusCode: res.statusCode,
+          durationMs: Date.now() - startedAt
+        })
+      }).catch((error) => console.error(toSafeErrorLog(error)));
+    });
+  }
+
+  next();
+});
 
 const paymentProcessorHealth = {
   running: false,
@@ -80,7 +112,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "providerPaymentToken", "last4", "expMonth", "expYear"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay"] },
+          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"] },
           providerPaymentToken: { type: "string" },
           last4: { type: "string" },
           expMonth: { type: "string" },
@@ -135,7 +167,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "verificationStatus"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay"] },
+          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"] },
           verificationStatus: { type: "string", enum: ["pending", "verified", "declined", "review"] },
           providerReferenceId: { type: "string" },
           avsResult: { type: "string" },
@@ -937,12 +969,18 @@ function deserializeRawResponse(rawResponse) {
 }
 
 function serializeCardForList(card) {
+  let pan = null;
+  try {
+    pan = card.pan_encrypted ? decrypt(card.pan_encrypted) : null;
+  } catch {
+    pan = null;
+  }
   return {
     id: card.id,
     provider: card.provider,
     provider_payment_token: card.provider_payment_token,
     first6: card.first6,
-    pan: decrypt(card.pan_encrypted),
+    pan,
     masked_pan: card.masked_pan,
     last4: card.last4,
     brand: card.brand,
@@ -957,6 +995,7 @@ function serializeCardForList(card) {
     auth_check_limit: card.auth_check_limit,
     is_enrolled: Boolean(card.is_enrolled),
     verification_status: card.verification_status,
+    provider_reference_id: card.provider_reference_id,
     masking_number: card.masking_number,
     masking_number_verified: Boolean(card.masking_number_verified),
     created_at: card.created_at,
@@ -987,6 +1026,235 @@ function getSavedCardId(cardId) {
     return null;
   }
   return cardId;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function cleanString(value) {
+  return String(value || "").trim();
+}
+
+function cleanOptional(value) {
+  const text = cleanString(value);
+  return text || null;
+}
+
+function normalizeMoney(value, fieldName = "amount", { allowZero = false } = {}) {
+  const amount = Number(String(value ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(amount) || amount < 0 || (!allowZero && amount === 0)) {
+    const error = new Error(`${fieldName} must be a ${allowZero ? "non-negative" : "positive"} amount`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return Number(amount.toFixed(2));
+}
+
+function normalizeEnum(value, allowed, fallback) {
+  const normalized = cleanString(value || fallback).toLowerCase().replace(/[\s-]+/g, "_");
+  return allowed.includes(normalized) ? normalized : fallback;
+}
+
+function digits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function last4(value) {
+  const raw = digits(value);
+  return raw ? raw.slice(-4) : null;
+}
+
+function maskLast4(value) {
+  const suffix = last4(value);
+  return suffix ? `****${suffix}` : null;
+}
+
+function fingerprintAccount(routingNumber, accountNumber) {
+  const routing = digits(routingNumber);
+  const account = digits(accountNumber);
+  if (!routing || !account) return null;
+  return crypto.createHash("sha256").update(`${routing}:${account}`).digest("hex");
+}
+
+async function getDebtDb() {
+  return db.getDb();
+}
+
+function serializeFundingAccount(account = {}) {
+  return {
+    id: account.id,
+    bankName: account.bank_name,
+    accountName: account.account_name,
+    accountType: account.account_type,
+    ownershipType: account.ownership_type,
+    businessName: account.business_name,
+    accountLast4: account.account_last4,
+    accountMasked: account.account_masked,
+    routingLast4: account.routing_last4,
+    routingMasked: account.routing_masked,
+    addressLine1: account.address_line1,
+    addressLine2: account.address_line2,
+    city: account.city,
+    state: account.state,
+    zip: account.zip,
+    country: account.country,
+    status: account.status,
+    notes: account.notes,
+    paymentCount: account.payment_count || 0,
+    totalPaid: account.total_paid || 0,
+    createdAt: account.created_at,
+    updatedAt: account.updated_at
+  };
+}
+
+function serializeDebtCard(card = {}) {
+  let loginUsername = null;
+  try {
+    loginUsername = card.login_username_encrypted ? decrypt(card.login_username_encrypted) : null;
+  } catch {
+    loginUsername = null;
+  }
+  return {
+    id: card.id,
+    ownerName: card.owner_name,
+    cardholderName: card.cardholder_name,
+    bankName: card.bank_name,
+    cardNetwork: card.card_network,
+    cardLast4: card.card_last4,
+    billingAddressLine1: card.billing_address_line1,
+    billingAddressLine2: card.billing_address_line2,
+    billingCity: card.billing_city,
+    billingState: card.billing_state,
+    billingZip: card.billing_zip,
+    billingCountry: card.billing_country,
+    loginUrl: card.login_url,
+    loginUsername,
+    loginPasswordConfigured: Boolean(card.login_password_encrypted),
+    mobileBankingConfigured: Boolean(card.login_username_encrypted || card.login_password_encrypted),
+    creditLimit: card.credit_limit || 0,
+    currentBalance: card.current_balance || 0,
+    minimumPayment: card.minimum_payment || 0,
+    dueDate: card.due_date,
+    status: card.status,
+    notes: card.notes,
+    paymentCount: card.payment_count || 0,
+    totalPaid: card.total_paid || 0,
+    expectedRepaymentTotal: card.expected_repayment_total || 0,
+    repaymentPaidTotal: card.repayment_paid_total || 0,
+    repaymentDueTotal: Math.max(0, Number(card.expected_repayment_total || 0) - Number(card.repayment_paid_total || 0)),
+    createdAt: card.created_at,
+    updatedAt: card.updated_at
+  };
+}
+
+function serializeDebtPayment(payment = {}, account = null, card = null) {
+  return {
+    id: payment.id,
+    debtCardId: payment.debt_card_id,
+    card: card ? {
+      id: card.id,
+      ownerName: card.owner_name,
+      bankName: card.bank_name,
+      cardLast4: card.card_last4
+    } : payment.card_snapshot || null,
+    paymentType: payment.payment_type,
+    sourceType: payment.source_type,
+    fundingAccountId: payment.funding_account_id,
+    fundingAccount: account ? {
+      id: account.id,
+      bankName: account.bank_name,
+      accountName: account.account_name,
+      accountType: account.account_type,
+      ownershipType: account.ownership_type,
+      accountMasked: account.account_masked,
+      routingMasked: account.routing_masked
+    } : payment.manual_source || null,
+    amount: payment.amount,
+    currency: payment.currency,
+    paymentDate: payment.payment_date,
+    paymentStatus: payment.payment_status,
+    confirmationNumber: payment.confirmation_number,
+    repaymentExpectedAmount: payment.repayment_expected_amount || 0,
+    repaymentPaidAmount: payment.repayment_paid_amount || 0,
+    repaymentStatus: payment.repayment_status,
+    repaymentDate: payment.repayment_date,
+    repaymentDueAmount: Math.max(0, Number(payment.repayment_expected_amount || 0) - Number(payment.repayment_paid_amount || 0)),
+    notes: payment.notes,
+    createdAt: payment.created_at,
+    updatedAt: payment.updated_at
+  };
+}
+
+async function getFundingAccount(accountId) {
+  if (!accountId) return null;
+  const database = await getDebtDb();
+  return database.collection("funding_accounts").findOne({ id: accountId });
+}
+
+async function getDebtCard(cardId) {
+  if (!cardId) return null;
+  const database = await getDebtDb();
+  return database.collection("debt_cards").findOne({ id: cardId });
+}
+
+async function buildPaymentRows(filter = {}) {
+  const database = await getDebtDb();
+  const payments = await database.collection("debt_payments")
+    .find(filter, { projection: { _id: 0 } })
+    .sort({ payment_date: -1, created_at: -1 })
+    .toArray();
+  const accountIds = [...new Set(payments.map((payment) => payment.funding_account_id).filter(Boolean))];
+  const cardIds = [...new Set(payments.map((payment) => payment.debt_card_id).filter(Boolean))];
+  const [accounts, cards] = await Promise.all([
+    accountIds.length ? database.collection("funding_accounts").find({ id: { $in: accountIds } }).toArray() : [],
+    cardIds.length ? database.collection("debt_cards").find({ id: { $in: cardIds } }).toArray() : []
+  ]);
+  const accountById = Object.fromEntries(accounts.map((account) => [account.id, account]));
+  const cardById = Object.fromEntries(cards.map((card) => [card.id, card]));
+  return payments.map((payment) => serializeDebtPayment(payment, accountById[payment.funding_account_id], cardById[payment.debt_card_id]));
+}
+
+async function recalculateDebtRollups() {
+  const database = await getDebtDb();
+  const [payments, accounts, cards] = await Promise.all([
+    database.collection("debt_payments").find({}, { projection: { _id: 0 } }).toArray(),
+    database.collection("funding_accounts").find({}, { projection: { _id: 0, id: 1 } }).toArray(),
+    database.collection("debt_cards").find({}, { projection: { _id: 0, id: 1 } }).toArray()
+  ]);
+  const byAccount = new Map();
+  const byCard = new Map();
+  for (const payment of payments) {
+    if (payment.funding_account_id) {
+      const current = byAccount.get(payment.funding_account_id) || { payment_count: 0, total_paid: 0 };
+      current.payment_count += 1;
+      current.total_paid += Number(payment.amount || 0);
+      byAccount.set(payment.funding_account_id, current);
+    }
+    if (payment.debt_card_id) {
+      const current = byCard.get(payment.debt_card_id) || {
+        payment_count: 0,
+        total_paid: 0,
+        expected_repayment_total: 0,
+        repayment_paid_total: 0
+      };
+      current.payment_count += 1;
+      current.total_paid += Number(payment.amount || 0);
+      current.expected_repayment_total += Number(payment.repayment_expected_amount || 0);
+      current.repayment_paid_total += Number(payment.repayment_paid_amount || 0);
+      byCard.set(payment.debt_card_id, current);
+    }
+  }
+  await Promise.all([
+    ...accounts.map((account) => database.collection("funding_accounts").updateOne(
+      { id: account.id },
+      { $set: { ...(byAccount.get(account.id) || { payment_count: 0, total_paid: 0 }), updated_at: nowIso() } }
+    )),
+    ...cards.map((card) => database.collection("debt_cards").updateOne(
+      { id: card.id },
+      { $set: { ...(byCard.get(card.id) || { payment_count: 0, total_paid: 0, expected_repayment_total: 0, repayment_paid_total: 0 }), updated_at: nowIso() } }
+    ))
+  ]);
 }
 
 function normalizeCardDetails(payload = {}) {
@@ -1351,6 +1619,8 @@ function resultAttemptType(operation) {
     auth: "auth_check",
     verification: "auth_check",
     verify: "auth_check",
+    live: "live_check",
+    balance: "balance_check",
     capture: "capture",
     refund: "refund",
     void: "void",
@@ -1367,6 +1637,9 @@ function getProviderReportCatalog() {
   const paypalManager = paypalService.getManagerStatus();
   const paypalNvp = paypalService.getNvpStatus();
   const fluidpayStatus = fluidpayService.getStatus();
+  const braintreeStatus = braintreeService.getStatus();
+  const nmiStatus = nmiService.getStatus();
+  const zohoStatus = zohoPaymentsService.getStatus();
   const globalPaymentsStatus = globalPaymentsService.getStatus();
   const propelrPayStatus = propelrPayService.getStatus();
   const cloverMissing = missingEnv([
@@ -1440,6 +1713,57 @@ function getProviderReportCatalog() {
         "FLUIDPAY_PROCESSOR_ID is optional unless your FluidPay account has no default processor"
       ],
       capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "transaction_detail", "transaction_search"]
+    },
+    {
+      key: "braintree",
+      group: "payment_gateways",
+      label: "Braintree",
+      configured: braintreeStatus.configured,
+      missing: braintreeStatus.missing,
+      configNotes: [
+        "Required for dev: BRAINTREE_MERCHANT_ID, BRAINTREE_PUBLIC_KEY and BRAINTREE_PRIVATE_KEY",
+        "BRAINTREE_GRAPHQL_URL defaults from BRAINTREE_ENV",
+        "BRAINTREE_MERCHANT_ACCOUNT_ID is optional unless the gateway account requires one"
+      ],
+      capabilities: ["status", "sale", "auth", "capture", "void", "refund", "verification"]
+    },
+    {
+      key: "nmi",
+      group: "payment_gateways",
+      label: "NMI",
+      configured: nmiStatus.configured,
+      missing: nmiStatus.missing,
+      configNotes: [
+        "Required: NMI_PAYMENT_API_KEY or NMI_SECURITY_KEY",
+        "NMI_API_BASE_URL defaults to https://secure.nmi.com",
+        "Sale/auth/validate/capture/refund/void use the NMI Payment API form endpoint"
+      ],
+      capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "verification", "transaction_detail"]
+    },
+    {
+      key: "zoho",
+      group: "payment_gateways",
+      label: "Zoho Payments",
+      configured: zohoStatus.configured,
+      missing: zohoStatus.missing,
+      optionalMissing: Object.entries(zohoStatus.pathStatus || {})
+        .filter(([, configured]) => !configured)
+        .map(([key]) => ({
+          status: "ZOHO_PAYMENTS_STATUS_PATH",
+          sale: "ZOHO_PAYMENTS_SALE_PATH",
+          authorize: "ZOHO_PAYMENTS_AUTH_PATH",
+          verification: "ZOHO_PAYMENTS_VERIFY_PATH",
+          capture: "ZOHO_PAYMENTS_CAPTURE_PATH",
+          refund: "ZOHO_PAYMENTS_REFUND_PATH",
+          void: "ZOHO_PAYMENTS_VOID_PATH",
+          transaction: "ZOHO_PAYMENTS_TRANSACTION_PATH"
+        }[key] || `ZOHO_PAYMENTS_${key.toUpperCase()}_PATH`)),
+      configNotes: [
+        "Required: ZOHO_PAYMENTS_API_BASE_URL plus access token/API key or OAuth refresh credentials",
+        "Operation paths are env-driven because Zoho payment products expose different API surfaces by account/product",
+        "Set ZOHO_PAYMENTS_ORGANIZATION_ID when the selected Zoho API requires an organization scope"
+      ],
+      capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "verification", "transaction_detail"]
     },
     {
       key: "globalpayments",
@@ -1635,6 +1959,9 @@ function getPaymentProcessorHealthChecks() {
     { key: "clover", check: () => cloverService.testConnection() },
     { key: "paypal", ignoreCatalogConfigured: true, check: () => runPayPalProcessorHealthCheck() },
     { key: "fluidpay", check: () => fluidpayService.testConnection() },
+    { key: "braintree", check: () => braintreeService.testConnection() },
+    { key: "nmi", check: () => nmiService.testConnection() },
+    { key: "zoho", check: () => zohoPaymentsService.testConnection() },
     { key: "globalpayments", check: () => globalPaymentsService.testConnection() },
     { key: "propelrpay", check: () => propelrPayService.testConnection() }
   ];
@@ -1711,6 +2038,40 @@ async function runPaymentProcessorHealthChecks(reason = "startup") {
   paymentProcessorHealth.running = false;
   paymentProcessorHealth.checkedAt = new Date().toISOString();
   return getPaymentProcessorHealthSnapshot();
+}
+
+function getProviderHealthRows() {
+  const health = getPaymentProcessorHealthSnapshot();
+  return getProviderReportCatalog()
+    .filter((item) => item.group === "payment_gateways")
+    .map((provider) => {
+      const processorHealth = health.processors[provider.key] || {
+        key: provider.key,
+        label: provider.label,
+        status: health.running ? "checking" : "unknown",
+        healthy: null,
+        configured: provider.configured,
+        checkedAt: null
+      };
+      const liveStatus = processorHealth.healthy === true
+        ? "live"
+        : provider.configured ? "not_live" : "not_configured";
+      return {
+        key: provider.key,
+        label: provider.label,
+        configured: Boolean(provider.configured),
+        live: processorHealth.healthy === true,
+        liveStatus,
+        status: processorHealth.status || "unknown",
+        message: processorHealth.message || null,
+        checkedAt: processorHealth.checkedAt || null,
+        missing: provider.missing || [],
+        optionalMissing: provider.optionalMissing || [],
+        capabilities: provider.capabilities || [],
+        configNotes: provider.configNotes || [],
+        health: processorHealth
+      };
+    });
 }
 
 function safeParseJson(value) {
@@ -2051,6 +2412,9 @@ function classifyAttemptProvider(attempt) {
   }
   if (attempt.provider === "clover") return "clover";
   if (attempt.provider === "fluidpay") return "fluidpay";
+  if (attempt.provider === "braintree") return "braintree";
+  if (attempt.provider === "nmi") return "nmi";
+  if (attempt.provider === "zoho") return "zoho";
   if (attempt.provider === "globalpayments") return "globalpayments";
   if (attempt.provider === "propelrpay") return "propelrpay";
   if (attempt.provider === "paypal") return "paypal";
@@ -2063,6 +2427,8 @@ function classifyAuditProvider(log) {
   if (action.includes("bin_check")) return "rapidapi_bin_checker";
   if (action.startsWith("clover_") || entityId.startsWith("clover")) return "clover";
   if (action.startsWith("fluidpay_") || entityId.startsWith("fluidpay")) return "fluidpay";
+  if (action.startsWith("nmi_") || entityId.startsWith("nmi")) return "nmi";
+  if (action.startsWith("zoho_") || entityId.startsWith("zoho")) return "zoho";
   if (action.startsWith("globalpayments_") || entityId.startsWith("globalpayments")) return "globalpayments";
   if (action.startsWith("propelrpay_") || entityId.startsWith("propelrpay")) return "propelrpay";
   if (action.startsWith("paypal_") || entityId.startsWith("paypal")) return "paypal";
@@ -2141,6 +2507,32 @@ function requireGlobalPaymentsConfigured(res) {
   return true;
 }
 
+function requireNmiConfigured(res) {
+  const status = nmiService.getStatus();
+  if (!status.configured) {
+    res.status(400).json({
+      error: "NMI configuration is incomplete",
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function requireZohoConfigured(res) {
+  const status = zohoPaymentsService.getStatus();
+  if (!status.configured) {
+    res.status(400).json({
+      error: "Zoho Payments configuration is incomplete",
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
 function requirePropelrPayConfigured(res) {
   const status = propelrPayService.getStatus();
   if (!status.configured) {
@@ -2156,6 +2548,16 @@ function requirePropelrPayConfigured(res) {
 }
 
 function getCardProviderConfigStatus(provider) {
+  if (provider === "paypal") {
+    const managerStatus = paypalService.getManagerStatus();
+    const nvpStatus = paypalService.getNvpStatus();
+    const configured = managerStatus.configured || nvpStatus.configured;
+    return {
+      configured,
+      missing: configured ? [] : [...managerStatus.missing, ...nvpStatus.missing],
+      message: "PayPal configuration is incomplete"
+    };
+  }
   if (provider === "clover") {
     const missing = missingEnv([
       ["CLOVER_MERCHANT_ID", env.providers.clover.merchantId],
@@ -2173,6 +2575,30 @@ function getCardProviderConfigStatus(provider) {
       configured: status.configured,
       missing: status.missing || [],
       message: "FluidPay configuration is incomplete"
+    };
+  }
+  if (provider === "braintree") {
+    const status = braintreeService.getStatus();
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: "Braintree configuration is incomplete"
+    };
+  }
+  if (provider === "nmi") {
+    const status = nmiService.getStatus();
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: "NMI configuration is incomplete"
+    };
+  }
+  if (provider === "zoho") {
+    const status = zohoPaymentsService.getStatus();
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: "Zoho Payments configuration is incomplete"
     };
   }
   if (provider === "globalpayments") {
@@ -2224,25 +2650,25 @@ const providerOperationCatalog = {
         label: "Token Storage Transaction",
         endpoint: "POST /api/provider-operations/cards",
         operation: "sale",
-        fields: ["pan", "expiry", "amount", "storedCredentialScenario", "merchid"],
+        fields: ["pan", "expiry", "amount", "merchid"],
         required: ["pan", "expiry", "amount"],
-        features: ["Initial storage/payment request", "Use Payment Scenario = Online Subscription Initial Payment for MIT recurring setup", "Returns retref for later stored-token usage"]
+        features: ["Initial storage/payment request", "Returns retref for later stored-token usage"]
       },
       {
         key: "stored_token_usage",
         label: "Stored Token Usage by Retref",
         endpoint: "POST /api/provider-operations/cards",
         operation: "sale",
-        fields: ["retref", "amount", "storedCredentialScenario", "merchid"],
+        fields: ["retref", "amount", "merchid"],
         required: ["retref", "amount"],
-        features: ["Operator enters only the previous retref", "Server resolves the stored token from local records", "Use Payment Scenario = Online Subscription Returning Customer for recurring MIT"]
+        features: ["Operator enters only the previous retref", "Server resolves the stored token from local records"]
       },
       {
         key: "auth",
         label: "Auth / Payment",
         endpoint: "POST /api/provider-operations/cards",
         operation: "auth",
-        fields: ["pan", "expiry", "amount", "storedCredentialScenario", "merchid"],
+        fields: ["pan", "expiry", "amount", "merchid"],
         required: ["pan", "expiry", "amount"],
         features: ["Sends account, expiry, amount, merchid", "Default CardConnect path: /auth", "API response returns amount.requestedAmount/submittedAmount/providerAmount"]
       },
@@ -2251,7 +2677,7 @@ const providerOperationCatalog = {
         label: "Sale",
         endpoint: "POST /api/provider-operations/cards",
         operation: "sale",
-        fields: ["pan", "expiry", "amount", "storedCredentialScenario", "merchid"],
+        fields: ["pan", "expiry", "amount", "merchid"],
         required: ["pan", "expiry", "amount"],
         features: ["Same CardConnect auth endpoint by default", "Sends capture=Y for payment sale scenario", "CardConnect respstat/respcode/resptext/retref are normalized"]
       },
@@ -2260,7 +2686,7 @@ const providerOperationCatalog = {
         label: "Verification",
         endpoint: "POST /api/provider-operations/cards",
         operation: "verification",
-        fields: ["pan", "expiry", "amount", "storedCredentialScenario", "merchid"],
+        fields: ["pan", "expiry", "amount", "merchid"],
         required: ["pan", "expiry"],
         features: ["Provider-only verification", "Does not trigger PayPal BIN check unless runBinCheck is true"]
       },
@@ -2269,7 +2695,7 @@ const providerOperationCatalog = {
         label: "2 Request Amount Sequence",
         endpoint: "POST /api/providers/propelr/amount-sequence",
         operation: "auth",
-        fields: ["pan", "expiry", "sequenceAmount1", "sequenceAmount2", "storedCredentialScenario", "merchid"],
+        fields: ["pan", "expiry", "sequenceAmount1", "sequenceAmount2", "merchid"],
         required: ["pan", "expiry", "sequenceAmount1", "sequenceAmount2"],
         features: ["Runs two Propelr auth requests sequentially", "Default amounts: 1,100.12 and 1,100.25", "Returns each outbound request body, submittedAmount, providerAmount and response"]
       },
@@ -2326,12 +2752,56 @@ const providerOperationCatalog = {
     label: "FluidPay",
     description: "FluidPay gateway card operations.",
     methods: [
-      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Gateway sale", "Amount in cents"] },
-      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold", "Capture later"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear"], features: ["Verification transaction"] },
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Gateway sale", "Amount in cents"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold", "Capture later"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Verification transaction"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture an auth"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund provider transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Void provider transaction"] }
+    ]
+  },
+  braintree: {
+    key: "braintree",
+    provider: "braintree",
+    label: "Braintree",
+    description: "Braintree GraphQL card operations using tokenized payment methods or direct card tokenization.",
+    methods: [
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["chargePaymentMethod", "Amount is decimal currency value"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["authorizePaymentMethod", "Capture later by transaction id"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Tokenizes card as a payment method", "No capture or sale is submitted"] },
+      { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture previous authorization"] },
+      { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund previous transaction"] },
+      { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Reverse an unsettled transaction"] }
+    ]
+  },
+  nmi: {
+    key: "nmi",
+    provider: "nmi",
+    label: "NMI",
+    description: "NMI Payment API card operations using security key authentication.",
+    methods: [
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts type=sale to /api/transact.php", "Amount is a decimal currency value"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts type=auth for an authorization hold", "Capture later by transaction id"] },
+      { key: "verification", label: "Validate", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Posts type=validate", "No amount is required"] },
+      { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Captures a previous auth by transaction id"] },
+      { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refunds a previous transaction"] },
+      { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids an unsettled transaction"] },
+      { key: "transaction_detail", label: "Transaction Detail", operation: "transaction_detail", fields: ["transactionId"], required: ["transactionId"], features: ["Reads transaction details through /api/query.php"] }
+    ]
+  },
+  zoho: {
+    key: "zoho",
+    provider: "zoho",
+    label: "Zoho Payments",
+    description: "Zoho Payments operations using configured Zoho API base URL, OAuth/API key auth and env-driven operation paths.",
+    methods: [
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts a sale payload to ZOHO_PAYMENTS_SALE_PATH", "Amount is a decimal currency value"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts an authorization payload to ZOHO_PAYMENTS_AUTH_PATH", "Capture later by transaction id"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Posts card verification to ZOHO_PAYMENTS_VERIFY_PATH", "No amount is required by default"] },
+      { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Captures a previous authorization by transaction id"] },
+      { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refunds a previous transaction"] },
+      { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids or cancels an unsettled transaction"] },
+      { key: "transaction_detail", label: "Transaction Detail", operation: "transaction_detail", fields: ["transactionId"], required: ["transactionId"], features: ["Reads transaction details through ZOHO_PAYMENTS_TRANSACTION_PATH"] }
     ]
   },
   globalpayments: {
@@ -2340,9 +2810,9 @@ const providerOperationCatalog = {
     label: "Global Payments",
     description: "Global Payments / Portico card operations.",
     methods: [
-      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Sale request"] },
-      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization request"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "storedCredentialScenario"], required: ["pan", "expMonth", "expYear"], features: ["Card verification"] },
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Sale request"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization request"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Card verification"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture previous auth"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund previous transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Void previous transaction"] }
@@ -2354,8 +2824,21 @@ const providerOperationCatalog = {
     label: "Clover",
     description: "Clover source-token based eCommerce operations.",
     methods: [
-      { key: "verification", label: "Source Verification", operation: "verification", fields: ["source"], required: ["source"], features: ["Requires Clover source token", "No raw card submission"] },
-      { key: "auth", label: "Preauth", operation: "auth", fields: ["source", "amount", "currency"], required: ["source", "amount"], features: ["Creates Clover preauthorization"] }
+      { key: "verification", label: "Verify", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Tokenizes card with Clover", "No eCommerce preauth is submitted"] },
+      { key: "auth", label: "Auth / Preauth", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "cvv2", "amount"], features: ["Tokenizes card with Clover", "Creates eCommerce preauthorization"] },
+      { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids a Clover preauthorization"] }
+    ]
+  },
+  paypal: {
+    key: "paypal",
+    provider: "paypal",
+    label: "PayPal",
+    description: "PayPal NVP / Payflow payment operations.",
+    methods: [
+      { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["DoDirectPayment sale"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold"] },
+      { key: "capture", label: "Capture", operation: "capture", fields: ["authorizationPnref", "amount", "captureComplete"], required: ["authorizationPnref", "amount"], features: ["Capture PayPal authorization"] },
+      { key: "void", label: "Void", operation: "void", fields: ["authorizationPnref", "note"], required: ["authorizationPnref"], features: ["Void PayPal authorization"] }
     ]
   }
 };
@@ -2377,6 +2860,8 @@ function getProviderOperationCatalog() {
 function normalizeProviderKey(provider) {
   const key = String(provider || "").toLowerCase();
   if (key === "propelr") return "propelrpay";
+  if (key === "networkmerchants" || key === "network-merchants") return "nmi";
+  if (key === "zohopayments" || key === "zoho-payments" || key === "zoho_payment") return "zoho";
   return key;
 }
 
@@ -2397,12 +2882,204 @@ function requireCloverConfigured(res) {
 }
 
 app.get("/health", asyncHandler(async (_req, res) => {
-  await query("select 1");
-  res.json({ ok: true });
+  const mongo = await getMongoStatus();
+  res.status(mongo.ok ? 200 : 503).json({
+    ok: mongo.ok,
+    services: { mongo }
+  });
+}));
+
+app.get("/api/system/mongodb/status", asyncHandler(async (_req, res) => {
+  const mongo = await getMongoStatus();
+  res.status(mongo.ok ? 200 : 503).json(mongo);
+}));
+
+app.get("/api/system/health", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  const [mongo, ollama] = await Promise.all([
+    getMongoStatus(),
+    getOllamaStatus()
+  ]);
+  const providerHealth = getPaymentProcessorHealthSnapshot();
+  const providers = getProviderHealthRows();
+  const ok = Boolean(mongo.ok && providers.every((provider) => !provider.configured || provider.live));
+  res.status(ok ? 200 : 207).json({
+    ok,
+    generatedAt: new Date().toISOString(),
+    services: {
+      mongo,
+      ollama,
+      providers: {
+        running: providerHealth.running,
+        checkedAt: providerHealth.checkedAt,
+        rows: providers
+      }
+    }
+  });
+}));
+
+app.post("/api/system/health/check", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const [mongo, ollama, providerHealth] = await Promise.all([
+    getMongoStatus(),
+    getOllamaStatus(),
+    runPaymentProcessorHealthChecks("manual-system-health")
+  ]);
+  const providers = getProviderHealthRows();
+  const ok = Boolean(mongo.ok && providers.every((provider) => !provider.configured || provider.live));
+  const response = {
+    ok,
+    generatedAt: new Date().toISOString(),
+    services: {
+      mongo,
+      ollama,
+      providers: {
+        running: providerHealth.running,
+        checkedAt: providerHealth.checkedAt,
+        rows: providers
+      }
+    }
+  };
+  await writeOperationAuditLog({
+    req,
+    entityType: "system",
+    entityId: "health",
+    action: "system_health_check",
+    status: ok ? "success" : "partial",
+    details: response
+  });
+  res.status(ok ? 200 : 207).json(response);
 }));
 
 app.get("/api/security/burp-suite/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
   res.json(burpSuiteService.getStatus());
+}));
+
+function getOllamaBaseUrl() {
+  return process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+}
+
+function getOllamaDefaultModel() {
+  return process.env.OLLAMA_DEFAULT_MODEL || "qwen2.5:7b";
+}
+
+async function fetchOllamaTags() {
+  const response = await fetch(process.env.OLLAMA_TAGS_URL || `${getOllamaBaseUrl()}/api/tags`);
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+  return { response, data };
+}
+
+async function getOllamaStatus() {
+  try {
+    const { response, data } = await fetchOllamaTags();
+    const models = Array.isArray(data.models) ? data.models : [];
+    return {
+      ok: response.ok,
+      configured: response.ok && models.length > 0,
+      status: response.ok ? (models.length ? "healthy" : "no_models") : "unhealthy",
+      baseUrl: getOllamaBaseUrl(),
+      modelCount: models.length,
+      models: models.map((model) => ({ name: model.name, modifiedAt: model.modified_at || null, size: model.size || null })),
+      message: models.length
+        ? "Ollama models loaded."
+        : `Ollama çalışıyor ama yüklü model yok. Örnek: \`ollama pull ${getOllamaDefaultModel()}\``
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      configured: false,
+      status: "unhealthy",
+      baseUrl: getOllamaBaseUrl(),
+      modelCount: 0,
+      models: [],
+      message: getOllamaErrorMessage(error)
+    };
+  }
+}
+
+function getOllamaErrorMessage(error) {
+  if (error?.cause?.code === "ECONNREFUSED" || error?.code === "ECONNREFUSED") {
+    return "Ollama servisi çalışmıyor. Önce `ollama serve` komutunu başlatın.";
+  }
+  return error?.message || "Ollama request failed";
+}
+
+app.get("/api/ollama/tags", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  const status = await getOllamaStatus();
+  res.status(status.ok ? 200 : 503).json(status);
+}));
+
+app.get("/api/ollama/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  const status = await getOllamaStatus();
+  res.status(status.ok ? 200 : 503).json(status);
+}));
+
+app.post("/api/ollama/chat", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  let payload = req.body || {};
+  try {
+    const { data } = await fetchOllamaTags();
+    const models = Array.isArray(data.models) ? data.models : [];
+    if (!models.length) {
+      return res.status(503).json({
+        ok: false,
+        status: "failed",
+        responseMessage: `Ollama çalışıyor ama yüklü model yok. Örnek: \`ollama pull ${getOllamaDefaultModel()}\``
+      });
+    }
+    const requestedModel = String(payload.model || "").trim();
+    const exists = models.some((model) => model.name === requestedModel);
+    payload = {
+      ...payload,
+      model: exists ? requestedModel : models[0].name
+    };
+  } catch (error) {
+    return res.status(503).json({
+      ok: false,
+      status: "failed",
+      responseMessage: getOllamaErrorMessage(error)
+    });
+  }
+
+  const response = await fetch(process.env.OLLAMA_CHAT_URL || `${getOllamaBaseUrl()}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { error: text };
+    }
+    return res.status(response.status).json({
+      ok: false,
+      status: "failed",
+      responseMessage: data?.error || data?.message || "Ollama chat request failed",
+      providerStatus: response.status,
+      providerResponse: data
+    });
+  }
+
+  res.status(response.status);
+  res.setHeader("Content-Type", response.headers.get("content-type") || "application/x-ndjson");
+  if (!response.body) {
+    res.end(await response.text());
+    return;
+  }
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(Buffer.from(value));
+  }
+  res.end();
 }));
 
 app.post("/api/security/burp-suite/start", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
@@ -2517,6 +3194,14 @@ app.get("/api/provider-router/status", requireAuth, requirePermission("canListCa
   });
 }));
 
+app.get("/api/providers/status-table", requireAuth, requirePermission("canListCards"), (_req, res) => {
+  res.json({
+    generatedAt: new Date().toISOString(),
+    health: getPaymentProcessorHealthSnapshot(),
+    rows: getProviderHealthRows()
+  });
+});
+
 app.get("/api/voice/token", requireAuth, requirePermission("canRunLiveCheck"), asyncHandler(async (req, res) => {
   res.json(twilioVoiceService.createVoiceAccessToken(req.user.username));
 }));
@@ -2612,16 +3297,6 @@ app.post("/api/providers/clover/cards/tokenize", requireAuth, requirePermission(
     tokenization,
     card
   });
-}));
-
-app.get("/api/providers/clover/learning/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
-  res.json(cloverLearningService.getCloverLearningStatus());
-}));
-
-app.post("/api/providers/clover/learning/runs", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
-  const result = await cloverLearningService.createRun(req.body || {});
-  console.log("[clover-machine-learning:response]", JSON.stringify(result, null, 2));
-  res.json(result);
 }));
 
 app.get("/api/providers/clover/merchant", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
@@ -3336,7 +4011,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
   provider = normalizeProviderKey(provider);
   operation = String(operation || "").toLowerCase();
   try {
-  if (!["clover", "fluidpay", "globalpayments", "propelrpay"].includes(provider)) {
+  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "paypal", "braintree", "nmi", "zoho"].includes(provider)) {
     const response = buildOperationResponseModel({
       operationId,
       provider: provider || req.body.provider || null,
@@ -3345,7 +4020,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
       result: {
         status: "failed",
         resultCode: "INVALID_PROVIDER",
-        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr or propelrpay"
+        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, paypal, braintree, nmi or zoho"
       },
       request: req.body,
       logs: { audit: false, providerAttempt: false },
@@ -3353,7 +4028,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     });
     return res.status(400).json(response);
   }
-  if (!["sale", "charge", "authorize", "auth", "ach", "ach_sale", "echeck", "verification", "verify", "capture", "refund", "void", "reversal"].includes(operation)) {
+  if (!["sale", "charge", "authorize", "auth", "ach", "ach_sale", "echeck", "verification", "verify", "live", "balance", "capture", "refund", "void", "reversal"].includes(operation)) {
     const response = buildOperationResponseModel({
       operationId,
       provider,
@@ -3487,39 +4162,74 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
   let resultPromise;
   if (provider === "fluidpay") {
     if (operation === "sale" || operation === "charge") resultPromise = fluidpayService.saleCard(payload);
-    if (operation === "authorize" || operation === "auth") resultPromise = fluidpayService.authorizeCard(payload);
-    if (operation === "verification" || operation === "verify") resultPromise = fluidpayService.createTransaction(payload, "verification");
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = fluidpayService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = fluidpayService.createTransaction(payload, "verification");
     if (operation === "capture") resultPromise = fluidpayService.captureTransaction(payload);
     if (operation === "refund") resultPromise = fluidpayService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = fluidpayService.voidTransaction(payload);
   }
+  if (provider === "braintree") {
+    if (operation === "sale" || operation === "charge") resultPromise = braintreeService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = braintreeService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = braintreeService.verifyCard(payload);
+    if (operation === "capture") resultPromise = braintreeService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = braintreeService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = braintreeService.voidTransaction(payload);
+  }
+  if (provider === "nmi") {
+    if (operation === "sale" || operation === "charge") resultPromise = nmiService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = nmiService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = nmiService.verifyCard(payload);
+    if (operation === "capture") resultPromise = nmiService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = nmiService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = nmiService.voidTransaction(payload);
+  }
+  if (provider === "zoho") {
+    if (operation === "sale" || operation === "charge") resultPromise = zohoPaymentsService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = zohoPaymentsService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = zohoPaymentsService.verifyCard(payload);
+    if (operation === "capture") resultPromise = zohoPaymentsService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = zohoPaymentsService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = zohoPaymentsService.voidTransaction(payload);
+  }
   if (provider === "globalpayments") {
     if (operation === "sale" || operation === "charge") resultPromise = globalPaymentsService.saleCard(payload);
-    if (operation === "authorize" || operation === "auth") resultPromise = globalPaymentsService.authorizeCard(payload);
-    if (operation === "verification" || operation === "verify") resultPromise = globalPaymentsService.verifyCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = globalPaymentsService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = globalPaymentsService.verifyCard(payload);
     if (operation === "capture") resultPromise = globalPaymentsService.captureTransaction(payload);
     if (operation === "refund") resultPromise = globalPaymentsService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = globalPaymentsService.reverseTransaction(payload);
   }
   if (provider === "propelrpay") {
     if (operation === "sale" || operation === "charge") resultPromise = propelrPayService.saleCard(payload);
-    if (operation === "authorize" || operation === "auth") resultPromise = propelrPayService.authorizeCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = propelrPayService.authorizeCard(payload);
     if (operation === "ach" || operation === "ach_sale" || operation === "echeck") resultPromise = propelrPayService.achSale(payload);
-    if (operation === "verification" || operation === "verify") resultPromise = propelrPayService.verifyCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = propelrPayService.verifyCard(payload);
     if (operation === "capture") resultPromise = propelrPayService.captureTransaction(payload);
     if (operation === "refund") resultPromise = propelrPayService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = propelrPayService.reverseTransaction(payload);
   }
+  if (provider === "paypal") {
+    if (operation === "sale" || operation === "charge") resultPromise = paypalService.saleCardNvp(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = paypalService.authorizeCardNvp(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = paypalService.liveCheckCard(payload);
+    if (operation === "capture") resultPromise = paypalService.captureAuthorizationNvp({ authorizationPnref: payload.transactionId || payload.retref, amount: payload.amount });
+    if (operation === "void" || operation === "reversal") resultPromise = paypalService.voidAuthorizationNvp({ authorizationPnref: payload.transactionId || payload.retref });
+  }
   if (provider === "clover") {
-    if (operation === "verification" || operation === "verify") {
+    if (operation === "verification" || operation === "verify" || operation === "live") {
       resultPromise = cloverService.verifyCard({
         source: payload.source || payload.providerPaymentToken || payload.token
       });
-    } else if (operation === "authorize" || operation === "auth") {
+    } else if (operation === "authorize" || operation === "auth" || operation === "balance") {
       resultPromise = cloverService.createPreAuthorization({
         source: payload.source || payload.providerPaymentToken || payload.token,
         amount: Number(payload.amount || 1),
         currency: payload.currency || "usd"
+      });
+    } else if (operation === "void" || operation === "reversal") {
+      resultPromise = cloverService.voidPreAuthorization({
+        transactionId: payload.transactionId || payload.retref || payload.cloverChargeId
       });
     } else {
       const response = buildOperationResponseModel({
@@ -3530,7 +4240,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         result: {
           status: "failed",
           resultCode: "UNSUPPORTED_CLOVER_OPERATION",
-          responseMessage: "Clover provider operations currently support verification/authorize only; refunds stay on the Clover refund form"
+          responseMessage: "Clover provider operations currently support verification/authorize/void; refunds stay on the Clover refund form"
         },
         request: {
           provider,
@@ -3572,7 +4282,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     return res.status(400).json(response);
   }
 
-  const shouldRunBinCheck = req.body.runBinCheck === true && ["verification", "verify"].includes(operation) && Boolean(payload.bin || payload.first6 || cardLog.first6);
+  const shouldRunBinCheck = req.body.runBinCheck === true && ["verification", "verify", "live", "balance", "auth", "sale", "charge"].includes(operation) && Boolean(payload.bin || payload.first6 || cardLog.first6);
   const binPromise = shouldRunBinCheck
     ? paypalService.binCheckCard({
         ...payload,
@@ -3596,6 +4306,13 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         error: getProviderMessage(binResult.reason)
       };
 
+  let operationNotes = `${provider} ${operation}`;
+  if (binCheck?.ok && binCheck?.details) {
+    const binNotes = `Bank: ${binCheck.details["Issuer Name / Bank"] || '-'}, Type: ${binCheck.details["Card Type"] || '-'} ${binCheck.details["Card Level"] || '-'}, Country: ${binCheck.details["ISO Country Code A2"] || '-'}`;
+    operationNotes = `${operationNotes} | ${binNotes}`;
+    payload.brand = payload.brand || binCheck.details["Card Brand"];
+  }
+
   const providerPaymentToken = payload.providerPaymentToken ||
     payload.token ||
     payload.source ||
@@ -3607,10 +4324,10 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         providerPaymentToken,
         payload,
         verificationStatus: mapVerificationStatus(result.status),
-        providerReferenceId: result.transactionId || result.cloverChargeId || null,
-        avsResult: result.avsResult || result.fraudChecks?.addressZipCheck || result.fraudChecks?.addressLine1Check || null,
+        providerReferenceId: result.transactionId || result.cloverChargeId || result.pnref || null,
+        avsResult: result.avsResult || result.fraudChecks?.addressZipCheck || result.fraudChecks?.addressLine1Check || result.avsZip || result.avsAddress || null,
         authResultCode: result.authCode || result.cvvResult || result.fraudChecks?.cvcCheck || result.resultCode || result.status || null,
-        notes: `${provider} ${operation}`
+        notes: operationNotes
       })
     : null;
   const cardId = persistedCard?.id || requestedCardId || null;
@@ -3622,13 +4339,14 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     status: result.status || "unknown",
     amount: result.amount ?? payload.amount ?? null,
     currency: result.currency || payload.currency || "USD",
-    providerReferenceId: result.transactionId || result.cloverChargeId || null,
+    providerReferenceId: result.transactionId || result.cloverChargeId || result.pnref || payload.transactionId || payload.retref || null,
     rawResponse: {
       operation,
       request: {
         provider,
         operation,
         amount: payload.amount ?? null,
+        gratuityAmount: payload.gratuityAmount ?? null,
         currency: payload.currency || null,
         transactionId: payload.transactionId || payload.retref || null,
         card: buildCardDebugSnapshot(payload)
@@ -3690,6 +4408,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
       provider,
       operation,
       amount: payload.amount ?? null,
+      gratuityAmount: payload.gratuityAmount ?? null,
       currency: payload.currency || null,
       transactionId: payload.transactionId || payload.retref || null,
       card: cardLog
@@ -3775,6 +4494,225 @@ app.post("/api/providers/globalpayments/cards/verify", requireAuth, requirePermi
 app.post("/api/providers/globalpayments/cards/capture", requireAuth, requirePermission("canRunAuthCheck"), globalPaymentsCardRoute("capture"));
 app.post("/api/providers/globalpayments/cards/refund", requireAuth, requirePermission("canRunAuthCheck"), globalPaymentsCardRoute("refund"));
 app.post("/api/providers/globalpayments/cards/void", requireAuth, requirePermission("canRunAuthCheck"), globalPaymentsCardRoute("void"));
+
+app.get("/api/providers/braintree/client-token", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const status = braintreeService.getStatus();
+  if (!status.configured) {
+    return sendApiError(res, req, 400, "Braintree configuration is incomplete", "CONFIG_MISSING");
+  }
+  const result = await braintreeService.generateClientToken({
+    customerId: req.query.customerId
+  });
+  res.json(result);
+}));
+
+app.post("/api/providers/braintree/dropin/checkout", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const operationId = uuidv4();
+  const startedAt = new Date().toISOString();
+  const operation = String(req.body.operation || "sale").toLowerCase();
+  const request = {
+    provider: "braintree",
+    operation,
+    amount: req.body.amount ?? null,
+    currency: req.body.currency || "USD",
+    submitForSettlement: req.body.submitForSettlement,
+    deviceData: req.body.deviceData ? "[present]" : null
+  };
+
+  try {
+    const configStatus = getCardProviderConfigStatus("braintree");
+    if (!configStatus.configured) {
+      const responseModel = buildOperationResponseModel({
+        operationId,
+        provider: "braintree",
+        operation,
+        httpStatus: 400,
+        result: {
+          status: "failed",
+          resultCode: "CONFIG_MISSING",
+          responseMessage: configStatus.message,
+          missing: configStatus.missing
+        },
+        request,
+        logs: { audit: false, providerAttempt: false },
+        startedAt
+      });
+      await writeOperationAuditLog({
+        req,
+        entityType: "provider",
+        entityId: "braintree",
+        action: `braintree_${operation}_dropin_config_missing`,
+        status: responseModel.status,
+        details: {
+          operationId,
+          resultCode: responseModel.resultCode,
+          responseMessage: responseModel.responseMessage,
+          missing: configStatus.missing,
+          request: responseModel.request
+        }
+      });
+      responseModel.logs.audit = true;
+      return res.status(400).json(responseModel);
+    }
+
+    const result = await braintreeService.checkoutNonce(req.body);
+    const responseHttpStatus = isSuccessfulOperationStatus(result.status) ? 200 : 402;
+    const responseModel = buildOperationResponseModel({
+      operationId,
+      provider: "braintree",
+      operation,
+      httpStatus: responseHttpStatus,
+      result,
+      request,
+      amount: {
+        requestedAmount: req.body.amount ?? null,
+        submittedAmount: result.amount ?? req.body.amount ?? null,
+        providerAmount: result.amount ?? null
+      },
+      logs: { audit: false, providerAttempt: false },
+      startedAt
+    });
+
+    await insertProviderAttempt({
+      cardId: getSavedCardId(req.body.cardId) || null,
+      provider: "braintree",
+      attemptType: resultAttemptType(operation),
+      status: responseModel.status,
+      amount: result.amount ?? req.body.amount ?? null,
+      currency: result.currency || req.body.currency || "USD",
+      providerReferenceId: result.transactionId || null,
+      rawResponse: {
+        operation,
+        request,
+        result
+      },
+      createdByUserId: req.user.id
+    });
+    responseModel.logs.providerAttempt = true;
+
+    await writeOperationAuditLog({
+      req,
+      entityType: "provider",
+      entityId: result.transactionId || "braintree-dropin",
+      action: `braintree_${operation}_dropin_checkout`,
+      status: responseModel.status,
+      details: {
+        operationId,
+        success: responseModel.success,
+        httpStatus: responseHttpStatus,
+        resultCode: responseModel.resultCode,
+        responseMessage: responseModel.responseMessage,
+        failureReason: responseModel.failureReason,
+        request: responseModel.request,
+        result
+      }
+    });
+    responseModel.logs.audit = true;
+
+    return res.status(responseHttpStatus).json(responseModel);
+  } catch (error) {
+    return sendOperationExceptionResponse({
+      req,
+      res,
+      error,
+      operationId,
+      provider: "braintree",
+      operation,
+      request,
+      startedAt,
+      action: `braintree_${operation}_dropin_exception`,
+      entityId: "braintree"
+    });
+  }
+}));
+
+function nmiCardRoute(operation) {
+  return asyncHandler(async (req, res) => {
+    await runProviderCardOperation(req, res, {
+      provider: "nmi",
+      operation
+    });
+  });
+}
+
+app.get("/api/providers/nmi/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json(nmiService.getStatus());
+}));
+
+app.post("/api/providers/nmi/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireNmiConfigured(res)) {
+    return;
+  }
+
+  const result = await nmiService.testConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "nmi",
+    action: "nmi_connection_test",
+    status: result.ok ? "success" : result.status || "unknown",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.status(result.ok ? 200 : 400).json(result);
+}));
+
+app.post("/api/providers/nmi/cards/sale", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("sale"));
+app.post("/api/providers/nmi/cards/auth", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("authorize"));
+app.post("/api/providers/nmi/cards/verify", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("verification"));
+app.post("/api/providers/nmi/cards/capture", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("capture"));
+app.post("/api/providers/nmi/cards/refund", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("refund"));
+app.post("/api/providers/nmi/cards/void", requireAuth, requirePermission("canRunAuthCheck"), nmiCardRoute("void"));
+app.get("/api/providers/nmi/transactions/:transactionId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireNmiConfigured(res)) {
+    return;
+  }
+  const result = await nmiService.getTransaction(req.params.transactionId);
+  res.json(result);
+}));
+
+function zohoCardRoute(operation) {
+  return asyncHandler(async (req, res) => {
+    await runProviderCardOperation(req, res, {
+      provider: "zoho",
+      operation
+    });
+  });
+}
+
+app.get("/api/providers/zoho/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json(zohoPaymentsService.getStatus());
+}));
+
+app.post("/api/providers/zoho/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireZohoConfigured(res)) {
+    return;
+  }
+
+  const result = await zohoPaymentsService.testConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "zoho",
+    action: "zoho_connection_test",
+    status: result.ok ? "success" : result.status || "unknown",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.status(result.ok === false ? 400 : 200).json(result);
+}));
+
+app.post("/api/providers/zoho/cards/sale", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("sale"));
+app.post("/api/providers/zoho/cards/auth", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("authorize"));
+app.post("/api/providers/zoho/cards/verify", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("verification"));
+app.post("/api/providers/zoho/cards/capture", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("capture"));
+app.post("/api/providers/zoho/cards/refund", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("refund"));
+app.post("/api/providers/zoho/cards/void", requireAuth, requirePermission("canRunAuthCheck"), zohoCardRoute("void"));
+app.get("/api/providers/zoho/transactions/:transactionId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireZohoConfigured(res)) {
+    return;
+  }
+  const result = await zohoPaymentsService.getTransaction(req.params.transactionId);
+  res.json(result);
+}));
 
 app.get(["/api/providers/propelrpay/status", "/api/providers/propelr/status"], requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
   res.json(propelrPayService.getStatus());
@@ -4655,6 +5593,46 @@ app.get("/api/provider-reports", requireAuth, requirePermission("canListCards"),
         },
         missing: reportsByKey.fluidpay.missing
       },
+      braintree: {
+        required: ["BRAINTREE_MERCHANT_ID", "BRAINTREE_PUBLIC_KEY", "BRAINTREE_PRIVATE_KEY"],
+        recommendedDev: {
+          BRAINTREE_ENV: process.env.BRAINTREE_ENV || "sandbox",
+          BRAINTREE_GRAPHQL_URL: env.providers.braintree.baseUrl || "https://payments.sandbox.braintree-api.com/graphql",
+          BRAINTREE_MERCHANT_ACCOUNT_ID: env.providers.braintree.merchantAccountId || "optional unless required by your Braintree account",
+          BRAINTREE_TIMEOUT_MS: String(env.providers.braintree.timeoutMs || 180000)
+        },
+        missing: reportsByKey.braintree.missing
+      },
+      nmi: {
+        required: ["NMI_PAYMENT_API_KEY or NMI_SECURITY_KEY"],
+        recommendedDev: {
+          NMI_API_BASE_URL: env.providers.nmi.baseUrl || "https://secure.nmi.com",
+          NMI_TRANSACTION_PATH: env.providers.nmi.transactionPath || "/api/transact.php",
+          NMI_QUERY_PATH: env.providers.nmi.queryPath || "/api/query.php",
+          NMI_CLIENT_KEY: env.providers.nmi.clientKey ? "configured" : "optional for Collect.js/client tokenization",
+          NMI_COMPONENT_TOKEN_KEY: env.providers.nmi.componentTokenKey ? "configured" : "optional for component tokenization",
+          NMI_TIMEOUT_MS: String(env.providers.nmi.timeoutMs || 180000)
+        },
+        missing: reportsByKey.nmi.missing
+      },
+      zoho: {
+        required: ["ZOHO_PAYMENTS_API_BASE_URL", "ZOHO_PAYMENTS_ACCESS_TOKEN or ZOHO_PAYMENTS_API_KEY or OAuth refresh credentials"],
+        recommendedDev: {
+          ZOHO_PAYMENTS_API_BASE_URL: env.providers.zoho.baseUrl || "provided by Zoho Payments/API product docs",
+          ZOHO_ACCOUNTS_BASE_URL: env.providers.zoho.accountsUrl || "https://accounts.zoho.com",
+          ZOHO_PAYMENTS_ORGANIZATION_ID: env.providers.zoho.organizationId ? "configured" : "optional unless required by selected Zoho API",
+          ZOHO_PAYMENTS_STATUS_PATH: env.providers.zoho.paths.status || "optional health/status endpoint",
+          ZOHO_PAYMENTS_SALE_PATH: env.providers.zoho.paths.sale || "provider-specific",
+          ZOHO_PAYMENTS_AUTH_PATH: env.providers.zoho.paths.authorize || "provider-specific",
+          ZOHO_PAYMENTS_VERIFY_PATH: env.providers.zoho.paths.verification || "provider-specific",
+          ZOHO_PAYMENTS_CAPTURE_PATH: env.providers.zoho.paths.capture || "provider-specific",
+          ZOHO_PAYMENTS_REFUND_PATH: env.providers.zoho.paths.refund || "provider-specific",
+          ZOHO_PAYMENTS_VOID_PATH: env.providers.zoho.paths.void || "provider-specific",
+          ZOHO_PAYMENTS_TRANSACTION_PATH: env.providers.zoho.paths.transaction || "provider-specific"
+        },
+        missing: reportsByKey.zoho.missing,
+        optionalMissing: reportsByKey.zoho.optionalMissing
+      },
       globalpayments: {
         required: ["GLOBALPAYMENTS_APP_ID or GLOBALPAYMENTS_PUBLIC_API_KEY", "GLOBALPAYMENTS_APP_KEY or GLOBALPAYMENTS_SECRET_API_KEY"],
         recommendedDev: {
@@ -4811,19 +5789,28 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
 
   const normalizedLogs = logs.map((log) => {
     const rawOriginal = safeParseJson(log.raw_response);
-    const rawForList = redactSensitiveReportData(rawOriginal);
+    const rawForList = canViewJsonModels ? rawOriginal : redactSensitiveReportData(rawOriginal);
     const card = cardsById[log.card_id] || null;
     const debugCard = canViewJsonModels ? buildStoredCardDebugSnapshot(card) : null;
     const user = usersById[log.created_by_user_id] || null;
     const requestModel = canViewJsonModels
-      ? redactProcessorDebugModel(extractRequestModel(rawOriginal, log, debugCard))
+      ? extractRequestModel(rawOriginal, log, debugCard)
       : null;
     const responseModel = canViewJsonModels
-      ? redactProcessorDebugModel(extractResponseModel(rawOriginal, debugCard))
+      ? extractResponseModel(rawOriginal, debugCard)
       : null;
     return {
       ...log,
       processor: classifyAttemptProvider(log),
+      transactionId: log.provider_reference_id ||
+        rawForList?.result?.transactionId ||
+        rawForList?.result?.retref ||
+        rawForList?.result?.cloverChargeId ||
+        rawForList?.providerResponse?.transactionId ||
+        rawForList?.providerResponse?.retref ||
+        rawForList?.request?.transactionId ||
+        rawForList?.request?.retref ||
+        null,
       card: card ? {
         id: card.id,
         maskedPan: card.masked_pan || (card.first6 && card.last4 ? `${card.first6}******${card.last4}` : null),
@@ -4843,10 +5830,19 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
     };
   });
 
-  const [attemptTypes, statuses] = await Promise.all([
-    database.collection("verification_attempts").distinct("attempt_type", processor ? { provider: query.provider } : {}),
-    database.collection("verification_attempts").distinct("status", processor ? { provider: query.provider } : {})
+  const [attemptTypesResult, statusesResult] = await Promise.all([
+    database.collection("verification_attempts").aggregate([
+      ...(processor ? [{ $match: { provider: processor } }] : []),
+      { $group: { _id: "$attempt_type" } }
+    ]).toArray(),
+    database.collection("verification_attempts").aggregate([
+      ...(processor ? [{ $match: { provider: processor } }] : []),
+      { $group: { _id: "$status" } }
+    ]).toArray()
   ]);
+
+  const attemptTypes = attemptTypesResult.map(r => r._id);
+  const statuses = statusesResult.map(r => r._id);
 
   res.json({
     generatedAt: new Date().toISOString(),
@@ -4967,6 +5963,288 @@ app.get("/api/config/providers", requireAuth, requirePermission("canListCards"),
   res.json(getPublicProviderConfig());
 });
 
+app.get("/api/debt-management/summary", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  await recalculateDebtRollups();
+  const database = await getDebtDb();
+  const [accounts, cards, payments] = await Promise.all([
+    database.collection("funding_accounts").find({}, { projection: { _id: 0 } }).toArray(),
+    database.collection("debt_cards").find({}, { projection: { _id: 0 } }).toArray(),
+    database.collection("debt_payments").find({}, { projection: { _id: 0 } }).toArray()
+  ]);
+  const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const expectedRepaymentTotal = payments.reduce((sum, payment) => sum + Number(payment.repayment_expected_amount || 0), 0);
+  const repaymentPaidTotal = payments.reduce((sum, payment) => sum + Number(payment.repayment_paid_amount || 0), 0);
+  res.json({
+    generatedAt: nowIso(),
+    accounts: accounts.length,
+    cards: cards.length,
+    payments: payments.length,
+    pendingPayments: payments.filter((payment) => payment.payment_status === "pending").length,
+    approvedPayments: payments.filter((payment) => payment.payment_status === "approved").length,
+    totalPaid,
+    expectedRepaymentTotal,
+    repaymentPaidTotal,
+    repaymentDueTotal: Math.max(0, expectedRepaymentTotal - repaymentPaidTotal)
+  });
+}));
+
+app.get("/api/debt-management/funding-accounts", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  await recalculateDebtRollups();
+  const database = await getDebtDb();
+  const rows = await database.collection("funding_accounts")
+    .find({}, { projection: { _id: 0 } })
+    .sort({ created_at: -1 })
+    .toArray();
+  res.json(rows.map(serializeFundingAccount));
+}));
+
+app.post("/api/debt-management/funding-accounts", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const accountNumber = digits(req.body.accountNumber);
+  const routingNumber = digits(req.body.routingNumber);
+  if (!accountNumber || !routingNumber) {
+    return sendApiError(res, req, 400, "accountNumber and routingNumber are required", "VALIDATION_ERROR");
+  }
+  if (!cleanString(req.body.bankName)) {
+    return sendApiError(res, req, 400, "bankName is required", "VALIDATION_ERROR");
+  }
+  const timestamp = nowIso();
+  const doc = {
+    id: uuidv4(),
+    bank_name: cleanString(req.body.bankName),
+    account_name: cleanOptional(req.body.accountName),
+    account_type: normalizeEnum(req.body.accountType, ["checking", "savings", "money_market", "other"], "checking"),
+    ownership_type: normalizeEnum(req.body.ownershipType, ["personal", "business"], "personal"),
+    business_name: cleanOptional(req.body.businessName),
+    account_number_encrypted: encrypt(accountNumber),
+    routing_number_encrypted: encrypt(routingNumber),
+    account_last4: last4(accountNumber),
+    routing_last4: last4(routingNumber),
+    account_masked: maskLast4(accountNumber),
+    routing_masked: maskLast4(routingNumber),
+    account_fingerprint: fingerprintAccount(routingNumber, accountNumber),
+    address_line1: cleanOptional(req.body.addressLine1),
+    address_line2: cleanOptional(req.body.addressLine2),
+    city: cleanOptional(req.body.city),
+    state: cleanOptional(req.body.state),
+    zip: cleanOptional(req.body.zip),
+    country: cleanOptional(req.body.country) || "US",
+    status: normalizeEnum(req.body.status, ["active", "inactive"], "active"),
+    notes: cleanOptional(req.body.notes),
+    payment_count: 0,
+    total_paid: 0,
+    created_by_user_id: req.user.id,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  const database = await getDebtDb();
+  try {
+    await database.collection("funding_accounts").insertOne(doc);
+  } catch (error) {
+    if (error?.code === 11000) {
+      return sendApiError(res, req, 409, "This funding account already exists", "DUPLICATE_ACCOUNT");
+    }
+    throw error;
+  }
+  await writeOperationAuditLog({
+    req,
+    entityType: "funding_account",
+    entityId: doc.id,
+    action: "funding_account_created",
+    status: "success",
+    details: serializeFundingAccount(doc)
+  });
+  res.status(201).json(serializeFundingAccount(doc));
+}));
+
+app.get("/api/debt-management/funding-accounts/:accountId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const account = await getFundingAccount(req.params.accountId);
+  if (!account) return sendApiError(res, req, 404, "Funding account not found", "NOT_FOUND");
+  const payments = await buildPaymentRows({ funding_account_id: req.params.accountId });
+  res.json({ ...serializeFundingAccount(account), payments });
+}));
+
+app.get("/api/debt-management/funding-accounts/:accountId/payments", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const account = await getFundingAccount(req.params.accountId);
+  if (!account) return sendApiError(res, req, 404, "Funding account not found", "NOT_FOUND");
+  res.json(await buildPaymentRows({ funding_account_id: req.params.accountId }));
+}));
+
+app.get("/api/debt-management/cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  await recalculateDebtRollups();
+  const database = await getDebtDb();
+  const rows = await database.collection("debt_cards")
+    .find({}, { projection: { _id: 0 } })
+    .sort({ created_at: -1 })
+    .toArray();
+  res.json(rows.map(serializeDebtCard));
+}));
+
+app.post("/api/debt-management/cards", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  if (!cleanString(req.body.ownerName) || !cleanString(req.body.bankName)) {
+    return sendApiError(res, req, 400, "ownerName and bankName are required", "VALIDATION_ERROR");
+  }
+  const timestamp = nowIso();
+  const doc = {
+    id: uuidv4(),
+    owner_name: cleanString(req.body.ownerName),
+    cardholder_name: cleanOptional(req.body.cardholderName) || cleanString(req.body.ownerName),
+    bank_name: cleanString(req.body.bankName),
+    card_network: cleanOptional(req.body.cardNetwork),
+    card_last4: last4(req.body.cardLast4 || req.body.cardNumber),
+    billing_address_line1: cleanOptional(req.body.billingAddressLine1),
+    billing_address_line2: cleanOptional(req.body.billingAddressLine2),
+    billing_city: cleanOptional(req.body.billingCity),
+    billing_state: cleanOptional(req.body.billingState),
+    billing_zip: cleanOptional(req.body.billingZip),
+    billing_country: cleanOptional(req.body.billingCountry) || "US",
+    login_url: cleanOptional(req.body.loginUrl),
+    login_username_encrypted: encrypt(req.body.loginUsername),
+    login_password_encrypted: encrypt(req.body.loginPassword),
+    credit_limit: req.body.creditLimit ? normalizeMoney(req.body.creditLimit, "creditLimit", { allowZero: true }) : 0,
+    current_balance: req.body.currentBalance ? normalizeMoney(req.body.currentBalance, "currentBalance", { allowZero: true }) : 0,
+    minimum_payment: req.body.minimumPayment ? normalizeMoney(req.body.minimumPayment, "minimumPayment", { allowZero: true }) : 0,
+    due_date: cleanOptional(req.body.dueDate),
+    status: normalizeEnum(req.body.status, ["active", "closed", "paused"], "active"),
+    notes: cleanOptional(req.body.notes),
+    payment_count: 0,
+    total_paid: 0,
+    expected_repayment_total: 0,
+    repayment_paid_total: 0,
+    created_by_user_id: req.user.id,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  const database = await getDebtDb();
+  await database.collection("debt_cards").insertOne(doc);
+  await writeOperationAuditLog({
+    req,
+    entityType: "debt_card",
+    entityId: doc.id,
+    action: "debt_card_created",
+    status: "success",
+    details: serializeDebtCard(doc)
+  });
+  res.status(201).json(serializeDebtCard(doc));
+}));
+
+app.get("/api/debt-management/cards/:cardId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const card = await getDebtCard(req.params.cardId);
+  if (!card) return sendApiError(res, req, 404, "Debt card not found", "NOT_FOUND");
+  const payments = await buildPaymentRows({ debt_card_id: req.params.cardId });
+  res.json({ ...serializeDebtCard(card), payments });
+}));
+
+app.get("/api/debt-management/cards/:cardId/payments", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const card = await getDebtCard(req.params.cardId);
+  if (!card) return sendApiError(res, req, 404, "Debt card not found", "NOT_FOUND");
+  res.json(await buildPaymentRows({ debt_card_id: req.params.cardId }));
+}));
+
+app.get("/api/debt-management/payments", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json(await buildPaymentRows());
+}));
+
+app.post("/api/debt-management/payments", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const card = await getDebtCard(req.body.debtCardId);
+  if (!card) return sendApiError(res, req, 404, "Debt card not found", "NOT_FOUND");
+  const sourceType = normalizeEnum(req.body.sourceType, ["registered", "manual"], "registered");
+  let account = null;
+  let manualSource = null;
+  if (sourceType === "registered") {
+    account = await getFundingAccount(req.body.fundingAccountId);
+    if (!account) return sendApiError(res, req, 404, "Funding account not found", "NOT_FOUND");
+  } else {
+    manualSource = {
+      bankName: cleanOptional(req.body.manualBankName),
+      accountName: cleanOptional(req.body.manualAccountName),
+      accountType: normalizeEnum(req.body.manualAccountType, ["checking", "savings", "money_market", "other"], "checking"),
+      ownershipType: normalizeEnum(req.body.manualOwnershipType, ["personal", "business"], "personal"),
+      accountMasked: maskLast4(req.body.manualAccountNumber || req.body.manualAccountLast4),
+      routingMasked: maskLast4(req.body.manualRoutingNumber || req.body.manualRoutingLast4)
+    };
+  }
+  const timestamp = nowIso();
+  const doc = {
+    id: uuidv4(),
+    debt_card_id: card.id,
+    payment_type: normalizeEnum(req.body.paymentType, ["ach_invoice", "card_debt"], "card_debt"),
+    source_type: sourceType,
+    funding_account_id: account?.id || null,
+    manual_source: manualSource,
+    card_snapshot: {
+      id: card.id,
+      ownerName: card.owner_name,
+      bankName: card.bank_name,
+      cardLast4: card.card_last4
+    },
+    amount: normalizeMoney(req.body.amount, "amount"),
+    currency: cleanOptional(req.body.currency) || "USD",
+    payment_date: cleanOptional(req.body.paymentDate) || timestamp.slice(0, 10),
+    payment_status: normalizeEnum(req.body.paymentStatus, ["pending", "approved", "failed", "cancelled"], "pending"),
+    confirmation_number: cleanOptional(req.body.confirmationNumber),
+    repayment_expected_amount: req.body.repaymentExpectedAmount ? normalizeMoney(req.body.repaymentExpectedAmount, "repaymentExpectedAmount", { allowZero: true }) : 0,
+    repayment_paid_amount: req.body.repaymentPaidAmount ? normalizeMoney(req.body.repaymentPaidAmount, "repaymentPaidAmount", { allowZero: true }) : 0,
+    repayment_status: normalizeEnum(req.body.repaymentStatus, ["unpaid", "partial", "paid", "waived"], "unpaid"),
+    repayment_date: cleanOptional(req.body.repaymentDate),
+    notes: cleanOptional(req.body.notes),
+    created_by_user_id: req.user.id,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  if (doc.repayment_paid_amount >= doc.repayment_expected_amount && doc.repayment_expected_amount > 0) {
+    doc.repayment_status = "paid";
+  } else if (doc.repayment_paid_amount > 0) {
+    doc.repayment_status = "partial";
+  }
+  const database = await getDebtDb();
+  await database.collection("debt_payments").insertOne(doc);
+  await recalculateDebtRollups();
+  await writeOperationAuditLog({
+    req,
+    entityType: "debt_payment",
+    entityId: doc.id,
+    action: "debt_payment_created",
+    status: doc.payment_status,
+    details: serializeDebtPayment(doc, account, card)
+  });
+  res.status(201).json(serializeDebtPayment(doc, account, card));
+}));
+
+app.patch("/api/debt-management/payments/:paymentId", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const database = await getDebtDb();
+  const existing = await database.collection("debt_payments").findOne({ id: req.params.paymentId });
+  if (!existing) return sendApiError(res, req, 404, "Payment not found", "NOT_FOUND");
+  const update = { updated_at: nowIso() };
+  if (req.body.paymentStatus !== undefined) update.payment_status = normalizeEnum(req.body.paymentStatus, ["pending", "approved", "failed", "cancelled"], existing.payment_status);
+  if (req.body.confirmationNumber !== undefined) update.confirmation_number = cleanOptional(req.body.confirmationNumber);
+  if (req.body.repaymentExpectedAmount !== undefined) update.repayment_expected_amount = normalizeMoney(req.body.repaymentExpectedAmount, "repaymentExpectedAmount", { allowZero: true });
+  if (req.body.repaymentPaidAmount !== undefined) update.repayment_paid_amount = normalizeMoney(req.body.repaymentPaidAmount, "repaymentPaidAmount", { allowZero: true });
+  if (req.body.repaymentStatus !== undefined) update.repayment_status = normalizeEnum(req.body.repaymentStatus, ["unpaid", "partial", "paid", "waived"], existing.repayment_status);
+  if (req.body.repaymentDate !== undefined) update.repayment_date = cleanOptional(req.body.repaymentDate);
+  if (req.body.notes !== undefined) update.notes = cleanOptional(req.body.notes);
+  const expected = update.repayment_expected_amount ?? existing.repayment_expected_amount ?? 0;
+  const paid = update.repayment_paid_amount ?? existing.repayment_paid_amount ?? 0;
+  if (req.body.repaymentStatus === undefined) {
+    update.repayment_status = expected > 0 && paid >= expected ? "paid" : paid > 0 ? "partial" : existing.repayment_status;
+  }
+  await database.collection("debt_payments").updateOne({ id: req.params.paymentId }, { $set: update });
+  await recalculateDebtRollups();
+  const payment = await database.collection("debt_payments").findOne({ id: req.params.paymentId });
+  const [account, card] = await Promise.all([
+    getFundingAccount(payment.funding_account_id),
+    getDebtCard(payment.debt_card_id)
+  ]);
+  await writeOperationAuditLog({
+    req,
+    entityType: "debt_payment",
+    entityId: payment.id,
+    action: "debt_payment_updated",
+    status: payment.payment_status,
+    details: serializeDebtPayment(payment, account, card)
+  });
+  res.json(serializeDebtPayment(payment, account, card));
+}));
+
 app.get("/api/cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
   const result = await query(
     `select
@@ -5065,17 +6343,26 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
     return sendApiError(res, req, 400, "provider, providerPaymentToken, last4, expMonth and expYear are required", "VALIDATION_ERROR");
   }
 
-  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr or propelrpay", "INVALID_PROVIDER");
+  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, braintree, nmi or zoho", "INVALID_PROVIDER");
+  }
+
+  let verifyPayload = { ...req.body, provider, amount: req.body.amount || 1, currency: req.body.currency || "USD", ipAddress: req.ip };
+  let verificationPromise;
+  if (provider === "fluidpay") verificationPromise = fluidpayService.createTransaction(verifyPayload, "verification");
+  else if (provider === "braintree") verificationPromise = braintreeService.verifyCard(verifyPayload);
+  else if (provider === "nmi") verificationPromise = nmiService.verifyCard(verifyPayload);
+  else if (provider === "zoho") verificationPromise = zohoPaymentsService.verifyCard(verifyPayload);
+  else if (provider === "propelr" || provider === "propelrpay") verificationPromise = propelrPayService.verifyCard(verifyPayload);
+  else if (provider === "paypal") verificationPromise = paypalService.liveCheckCard(verifyPayload);
+  else if (provider === "clover") {
+    verificationPromise = tokenizeCloverPayload(verifyPayload).then(t => cloverService.verifyCard({ source: t.payload.source }));
+  } else {
+    verificationPromise = globalPaymentsService.verifyCard(verifyPayload);
   }
 
   const [verificationResult, binResult] = await Promise.allSettled([
-    globalPaymentsService.verifyCard({
-      ...req.body,
-      provider,
-      amount: req.body.amount || 1,
-      currency: req.body.currency || "USD"
-    }),
+    verificationPromise,
     paypalService.binCheckCard({
       ...req.body,
       bin: first6
@@ -5099,7 +6386,13 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
         error: getProviderMessage(binResult.reason)
       };
 
-  if (verification.status !== "approved") {
+  if (binCheck.ok && binCheck.details) {
+    brand = brand || binCheck.details["Card Brand"] || validation.brand;
+    const binNotes = `Bank: ${binCheck.details["Issuer Name / Bank"] || '-'}, Type: ${binCheck.details["Card Type"] || '-'} ${binCheck.details["Card Level"] || '-'}, Country: ${binCheck.details["ISO Country Code A2"] || '-'}`;
+    notes = notes ? `${notes} | ${binNotes}` : binNotes;
+  }
+
+  if (!["approved", "verified", "success", "ok"].includes(String(verification.status).toLowerCase())) {
     await writeAuditLog({
       entityType: "card_intake",
       action: "card_rejected_by_provider_verification",
@@ -5119,9 +6412,9 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
   }
 
   verificationStatus = "verified";
-  avsResult = verification.avsResult || avsResult || null;
-  authResultCode = verification.cvvResult || verification.authCode || authResultCode || null;
-  providerReferenceId = verification.transactionId || providerReferenceId || null;
+  avsResult = verification.avsResult || verification.avsZip || verification.avsAddress || avsResult || null;
+  authResultCode = verification.cvvResult || verification.cvv2Match || verification.authCode || authResultCode || null;
+  providerReferenceId = verification.transactionId || verification.cloverChargeId || verification.pnref || providerReferenceId || null;
 
   const result = await query(
     `insert into cards (
@@ -5186,12 +6479,12 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
 
   await insertProviderAttempt({
     cardId,
-    provider: "globalpayments",
-    attemptType: "auth_check",
+    provider,
+    attemptType: "live_check",
     status: verification.status,
     amount: verification.amount || Number(req.body.amount || 1),
     currency: verification.currency || req.body.currency || "USD",
-    providerReferenceId: verification.transactionId || null,
+    providerReferenceId: providerReferenceId,
     rawResponse: {
       card: buildCardLogSnapshot(req.body),
       verification
@@ -5291,8 +6584,8 @@ app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermiss
     notes
   } = req.body;
 
-  if (!provider || !["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr or propelrpay", "INVALID_PROVIDER");
+  if (!provider || !["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, braintree, nmi or zoho", "INVALID_PROVIDER");
   }
 
   if (!verificationStatus || !["pending", "verified", "declined", "review"].includes(verificationStatus)) {
@@ -5572,6 +6865,8 @@ app.post("/api/cards/:cardId/enrollment", requireAuth, asyncHandler(async (req, 
 app.use("/api/masks", requireAuth, maskRoutes);
 app.use("/api/numbers", requireAuth, numberRoutes);
 app.use("/api/calls", requireAuth, callRoutes);
+app.use("/api/providers/clover/learning", createCloverLearningRouter({ requireAuth, requirePermission }));
+app.use("/api/clover/learning", createCloverLearningRouter({ requireAuth, requirePermission }));
 
 app.use((error, req, res, _next) => {
   console.error(toSafeErrorLog(error));
@@ -5585,7 +6880,12 @@ app.use((error, req, res, _next) => {
 });
 
 app.get("*", (_req, res) => {
-  res.sendFile(path.resolve(process.cwd(), "public", "index.html"));
+  const reactIndex = path.resolve(process.cwd(), "public", "react", "index.html");
+  res.sendFile(reactIndex, (error) => {
+    if (error) {
+      res.sendFile(path.resolve(process.cwd(), "public", "index.html"));
+    }
+  });
 });
 
 ensureBootstrapAdmin()

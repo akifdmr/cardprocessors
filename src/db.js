@@ -1,8 +1,21 @@
-const { MongoClient } = require("mongodb");
+const { MongoClient, ServerApiVersion } = require("mongodb");
 const { v4: uuidv4 } = require("uuid");
 const env = require("./config/env");
 
-const client = new MongoClient(env.databaseUrl);
+const mongoClientOptions = {
+  serverSelectionTimeoutMS: env.mongo.serverSelectionTimeoutMs,
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true
+  }
+};
+
+if (env.mongo.tlsCertificateKeyFile) {
+  mongoClientOptions.tlsCertificateKeyFile = env.mongo.tlsCertificateKeyFile;
+}
+
+const client = new MongoClient(env.databaseUrl, mongoClientOptions);
 let databasePromise;
 
 function now() {
@@ -27,9 +40,60 @@ function makeInsertRow(fields, values) {
 
 async function getDb() {
   if (!databasePromise) {
-    databasePromise = client.connect().then(() => client.db(env.databaseName));
+    databasePromise = client.connect()
+      .then(() => client.db(env.databaseName))
+      .catch((error) => {
+        databasePromise = null;
+        throw error;
+      });
   }
   return databasePromise;
+}
+
+function getMongoErrorSummary(error) {
+  const cause = error?.cause || error?.reason || error;
+  const message = String(cause?.message || error?.message || "Unknown MongoDB error");
+  const isTlsInternalError = message.includes("tlsv1 alert internal error");
+
+  if (isTlsInternalError) {
+    return {
+      code: "MONGODB_TLS_INTERNAL_ERROR",
+      message: "MongoDB TLS handshake failed. Check Atlas auth mode, client certificate settings, and IP allowlist.",
+      detail: "The previous config requested MONGODB-X509 without a client certificate; password auth is derived when MONGODB_USERNAME and MONGODB_PASSWORD are present."
+    };
+  }
+
+  return {
+    code: error?.codeName || error?.code || error?.name || "MONGODB_ERROR",
+    message
+  };
+}
+
+async function getMongoStatus() {
+  const authMode = env.mongo.tlsCertificateKeyFile
+    ? "x509-certificate"
+    : env.mongo.usesDerivedPasswordAuth ? "password-derived-from-env" : "connection-string";
+
+  try {
+    const db = await getDb();
+    await db.command({ ping: 1 });
+    return {
+      ok: true,
+      database: env.databaseName,
+      source: env.mongo.source,
+      hasCertificate: Boolean(env.mongo.tlsCertificateKeyFile),
+      authMode
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      database: env.databaseName,
+      source: env.mongo.source,
+      hasCertificate: Boolean(env.mongo.tlsCertificateKeyFile),
+      authMode,
+      error: getMongoErrorSummary(error)
+    };
+  }
 }
 
 async function ensureMongoSchema() {
@@ -44,6 +108,13 @@ async function ensureMongoSchema() {
     db.collection("card_phone_numbers").createIndex({ card_id: 1, created_at: -1 }),
     db.collection("unchargeback_cases").createIndex({ created_at: -1 }),
     db.collection("unchargeback_cases").createIndex({ case_id: 1 }),
+    db.collection("funding_accounts").createIndex({ created_at: -1 }),
+    db.collection("funding_accounts").createIndex({ account_fingerprint: 1 }, { unique: true, sparse: true }),
+    db.collection("debt_cards").createIndex({ created_at: -1 }),
+    db.collection("debt_cards").createIndex({ owner_name: 1, bank_name: 1 }),
+    db.collection("debt_payments").createIndex({ debt_card_id: 1, payment_date: -1 }),
+    db.collection("debt_payments").createIndex({ funding_account_id: 1, payment_date: -1 }),
+    db.collection("debt_payments").createIndex({ repayment_status: 1, payment_status: 1 }),
     db.collection("audit_logs").createIndex({ entity_type: 1, entity_id: 1, created_at: -1 })
   ]);
 }
@@ -453,5 +524,7 @@ module.exports = {
   client,
   db: { getDb },
   ensureMongoSchema,
+  getMongoErrorSummary,
+  getMongoStatus,
   query
 };

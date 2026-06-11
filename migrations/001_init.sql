@@ -40,7 +40,7 @@ create table if not exists cards (
     substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
     lower(hex(randomblob(6)))
   ),
-  provider text not null check (provider in ('clover', 'paypal', 'fluidpay', 'globalpayments', 'propelrpay')),
+  provider text not null check (provider in ('clover', 'paypal', 'fluidpay', 'globalpayments', 'propelrpay', 'braintree', 'nmi', 'zoho')),
   provider_customer_id text,
   provider_payment_token text not null,
   masked_pan text not null,
@@ -99,7 +99,7 @@ create table if not exists verification_attempts (
     lower(hex(randomblob(6)))
   ),
   card_id text not null references cards(id) on delete cascade,
-  provider text not null check (provider in ('clover', 'paypal', 'fluidpay', 'globalpayments', 'propelrpay')),
+  provider text not null check (provider in ('clover', 'paypal', 'fluidpay', 'globalpayments', 'propelrpay', 'braintree', 'nmi', 'zoho')),
   attempt_type text not null check (attempt_type in ('live_check', 'bin_check', 'balance_check', 'auth_check', 'sale_check', 'capture', 'refund', 'void', 'iframe_verify')),
   status text not null,
   amount numeric(12, 2),

@@ -110,6 +110,15 @@ function pickFirst(source, paths, fallback = null) {
   return fallback;
 }
 
+function firstMeaningful(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "string" && ["api only", "unknown", "null", "undefined"].includes(value.trim().toLowerCase())) continue;
+    return value;
+  }
+  return null;
+}
+
 function normalizeBoolean(value) {
   if (typeof value === "boolean") {
     return value;
@@ -164,24 +173,31 @@ function cleanDetailValue(value) {
 
 function formatBinDetails(bin, responseData) {
   const lookup = getBinPayload(responseData);
-  const countryAlpha2 = pickFirst(lookup, ["country.alpha2", "country.code", "country.alpha_2"]);
-  const countryAlpha3 = pickFirst(lookup, ["country.alpha3", "country.alpha_3"], getCountryAlpha3(countryAlpha2));
+  const countryAlpha2 = firstMeaningful(pickFirst(lookup, ["country.alpha2", "country.code", "country.alpha_2", "country_code", "alpha2"]));
+  const countryAlpha3 = firstMeaningful(pickFirst(lookup, ["country.alpha3", "country.alpha_3", "country_code3", "alpha3"]), getCountryAlpha3(countryAlpha2));
+  const countryName = firstMeaningful(pickFirst(lookup, ["country.name", "country", "country_name"]));
+  const bankName = firstMeaningful(pickFirst(lookup, ["issuer.name", "bank.name", "issuer_name", "issuer", "bank"]));
+  const scheme = firstMeaningful(pickFirst(lookup, ["scheme", "network", "card_scheme", "brand"]));
+  const brand = firstMeaningful(pickFirst(lookup, ["brand", "card_brand", "scheme", "network"]));
+  const type = firstMeaningful(pickFirst(lookup, ["type", "card_type", "funding"]));
+  const level = firstMeaningful(pickFirst(lookup, ["level", "category", "product.name", "product", "card_level"]));
+  const currency = firstMeaningful(pickFirst(lookup, ["currency", "country.currency", "currency_code"]));
 
   return {
     "BIN/IIN": String(pickFirst(lookup, ["number", "bin"], bin)),
     "BIN Length": pickFirst(lookup, ["length"], String(bin).length),
-    "Card Scheme": String(pickFirst(lookup, ["scheme"], "UNKNOWN")).toUpperCase(),
-    "Card Brand": String(pickFirst(lookup, ["brand", "card_brand", "scheme"], "UNKNOWN")).toUpperCase(),
-    "Card Type": String(pickFirst(lookup, ["type", "card_type"], "API Only")).toUpperCase(),
-    "Card Level": pickFirst(lookup, ["level", "category"], "API Only"),
+    "Card Scheme": scheme ? String(scheme).toUpperCase() : "API Only",
+    "Card Brand": brand ? String(brand).toUpperCase() : "API Only",
+    "Card Type": type ? String(type).toUpperCase() : "API Only",
+    "Card Level": level || "API Only",
     "Commercial Card?": yesNo(pickFirst(lookup, ["is_commercial", "commercial"], null)),
     "Prepaid Card?": yesNo(pickFirst(lookup, ["is_prepaid", "prepaid"], null)),
     "Reloadable Card?": yesNo(pickFirst(lookup, ["reloadable", "is_reloadable"], null)),
-    "Card Currency": pickFirst(lookup, ["currency"], "API Only"),
-    "Issuer Name / Bank": pickFirst(lookup, ["issuer.name", "bank.name", "issuer_name", "bank"], "API Only"),
+    "Card Currency": currency || "API Only",
+    "Issuer Name / Bank": bankName || "API Only",
     "Issuer's / Bank's Website": pickFirst(lookup, ["issuer.website", "bank.url", "bank.website"], "API Only"),
     "Issuer / Bank Phone": pickFirst(lookup, ["issuer.phone", "bank.phone"], "API Only"),
-    "ISO Country Name": pickFirst(lookup, ["country.name"], "API Only"),
+    "ISO Country Name": countryName || "API Only",
     "Country Native Name": pickFirst(lookup, ["country.native"], "API Only"),
     "Country Flag": pickFirst(lookup, ["country.flag", "country.emoji"], "API Only"),
     "Country Numeric Code": pickFirst(lookup, ["country.numeric"], "API Only"),
@@ -196,6 +212,31 @@ function formatBinDetails(bin, responseData) {
     "Country IDD": pickFirst(lookup, ["country.idd"], "API Only"),
     "Country Language": pickFirst(lookup, ["country.language"], "API Only"),
     "Country Language Code": pickFirst(lookup, ["country.language_code"], "API Only")
+  };
+}
+
+function summarizeBinDetails(bin, responseData) {
+  const lookup = getBinPayload(responseData);
+  const details = formatBinDetails(bin, responseData);
+  return {
+    bin: details["BIN/IIN"],
+    country: firstMeaningful(details["ISO Country Name"], details["ISO Country Code A2"], pickFirst(lookup, ["country", "country_name"])),
+    countryCode: firstMeaningful(details["ISO Country Code A2"], pickFirst(lookup, ["country.code", "country.alpha2", "alpha2"])),
+    issuer: firstMeaningful(details["Issuer Name / Bank"], pickFirst(lookup, ["issuer", "bank"])),
+    scheme: firstMeaningful(details["Card Scheme"], details["Card Brand"]),
+    brand: firstMeaningful(details["Card Brand"], details["Card Scheme"]),
+    type: firstMeaningful(details["Card Type"], pickFirst(lookup, ["funding"])),
+    level: firstMeaningful(details["Card Level"], pickFirst(lookup, ["product", "category"])),
+    commercial: firstMeaningful(details["Commercial Card?"], pickFirst(lookup, ["commercial", "is_commercial"])),
+    prepaid: firstMeaningful(details["Prepaid Card?"], pickFirst(lookup, ["prepaid", "is_prepaid"])),
+    currency: firstMeaningful(details["Card Currency"], details["ISO Country Currency"]),
+    usefulLabel: [
+      firstMeaningful(details["ISO Country Name"], details["ISO Country Code A2"]),
+      firstMeaningful(details["Issuer Name / Bank"]),
+      firstMeaningful(details["Card Level"]),
+      firstMeaningful(details["Card Type"]),
+      firstMeaningful(details["Card Scheme"], details["Card Brand"])
+    ].filter(Boolean).join(" / ")
   };
 }
 
@@ -269,6 +310,7 @@ async function binCheckCard({ pan, bin, ip }) {
     status: valid === false || success === false || code >= 400 ? "failed" : "passed",
     bin: normalized,
     ip: lookupIp || null,
+    summary: summarizeBinDetails(normalized, responseData),
     details: formatBinDetails(normalized, responseData),
     ipDetails: lookupIp ? formatIpDetails(responseData) : null,
     source: "rapidapi_bin_ip_checker",

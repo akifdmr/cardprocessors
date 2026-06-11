@@ -269,32 +269,51 @@ h3 {
 }
 
 .processor-menu {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
 }
 
-.processor-menu a {
+.processor-menu-card {
+  border: 1px solid rgba(151, 169, 159, 0.16);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(5, 8, 7, 0.28);
+}
+
+.processor-menu-card > a {
   display: flex;
   align-items: center;
   gap: 10px;
   text-decoration: none;
   color: var(--ink);
-  border: 1px solid rgba(151, 169, 159, 0.16);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: rgba(5, 8, 7, 0.28);
+  padding: 4px 2px 10px;
 }
 
-.processor-menu a.active {
+.processor-menu-card.active {
   background: var(--accent);
   color: #04110a;
   border-color: transparent;
   font-weight: 700;
 }
 
-.processor-menu a.active .processor-health-dot {
+.processor-menu-card.active a {
+  color: #04110a;
+}
+
+.processor-menu-card.active .processor-health-dot {
   box-shadow: 0 0 0 3px rgba(4, 17, 10, 0.18);
+}
+
+.processor-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.processor-menu-actions button {
+  min-width: 78px;
+  justify-content: center;
 }
 
 .processor-health-dot {
@@ -333,11 +352,19 @@ h3 {
 .processor-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1120px;
+  min-width: 1460px;
 }
 
 .processor-action-col {
   width: 112px;
+}
+
+.processor-transaction-col {
+  width: 180px;
+}
+
+.processor-actions-col {
+  width: 320px;
 }
 
 .processor-table th,
@@ -368,6 +395,106 @@ h3 {
 .processor-table-action button {
   width: 92px;
   justify-content: center;
+}
+
+.processor-transaction-id {
+  max-width: 180px;
+  overflow-wrap: anywhere;
+  font: 12px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.processor-table-actions {
+  min-width: 300px;
+}
+
+.processor-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.processor-row-actions button {
+  min-width: 72px;
+  justify-content: center;
+}
+
+.processor-action-form {
+  display: grid;
+  gap: 16px;
+}
+
+.processor-action-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.processor-action-summary div,
+.processor-action-fields label {
+  border: 1px solid rgba(151, 169, 159, 0.16);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.processor-action-summary span,
+.processor-action-fields span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.processor-action-summary strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.processor-action-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.shared-card-fields {
+  grid-column: 1 / -1;
+}
+
+.shared-address-block {
+  display: grid;
+  gap: 10px;
+}
+
+.shared-address-block > button {
+  width: fit-content;
+}
+
+.shared-address-fields {
+  grid-column: 1 / -1;
+}
+
+.card-intelligence-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.action-loader {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(151, 169, 159, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: rgba(5, 8, 7, 0.92);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+.action-loader.active {
+  display: flex;
 }
 
 .json-modal-pre {

@@ -11,11 +11,16 @@ dotenv.config({
 const paypalEnv = process.env.PAYPAL_ENV || "live";
 const fluidpayEnv = process.env.FLUIDPAY_ENV || "sandbox";
 const globalPaymentsEnv = process.env.GLOBALPAYMENTS_ENV || "sandbox";
+const braintreeEnv = process.env.BRAINTREE_ENV || "sandbox";
+const nmiEnv = process.env.NMI_ENV || "production";
+const zohoPaymentsEnv = process.env.ZOHO_PAYMENTS_ENV || process.env.ZOHO_PAYMENT_ENV || "production";
+const databaseName = process.env.MONGODB_DATABASE || "cloverapp";
 
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+    console.error(`:${process.env.NODE_ENV} ortaminda eksik veya tanimsiz element var: ${name}`);
+    // throw new Error(`:${process.env} ortaminda eksik veya tanimsiz element var`);
   }
   return value;
 }
@@ -54,11 +59,64 @@ function boolEnv(name, fallback = false) {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+function hasMongoClientCertificateConfig() {
+  return Boolean(
+    optionalEnv("MONGODB_TLS_CERT_KEY_FILE") ||
+    optionalEnv("MONGODB_TLS_CERTIFICATE_KEY_FILE") ||
+    optionalEnv("MONGODB_SSL_CERT_KEY_FILE")
+  );
+}
+
+function mongoClientCertificateKeyFile() {
+  return optionalEnv("MONGODB_TLS_CERT_KEY_FILE") ||
+    optionalEnv("MONGODB_TLS_CERTIFICATE_KEY_FILE") ||
+    optionalEnv("MONGODB_SSL_CERT_KEY_FILE");
+}
+
+function resolveDatabaseUrl() {
+  const rawDatabaseUrl = optionalEnv("DATABASE_URL") || optionalEnv("MONGODB_CONNECTIONSTRING");
+  if (!rawDatabaseUrl) {
+    return requireEnv("DATABASE_URL");
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(rawDatabaseUrl);
+  } catch (_error) {
+    return rawDatabaseUrl;
+  }
+
+  const authMechanism = parsed.searchParams.get("authMechanism");
+  const isX509 = authMechanism && authMechanism.toUpperCase() === "MONGODB-X509";
+  const username = optionalEnv("MONGODB_USERNAME");
+  const password = optionalEnv("MONGODB_PASSWORD");
+
+  if (isX509 && !hasMongoClientCertificateConfig() && username && password) {
+    parsed.username = username;
+    parsed.password = password;
+    parsed.pathname = "/";
+    parsed.searchParams.delete("authMechanism");
+    parsed.searchParams.delete("authSource");
+    return parsed.toString();
+  }
+
+  return rawDatabaseUrl;
+}
+
 module.exports = {
   nodeEnv: optionalEnv("NODE_ENV", nodeEnv),
   port: Number(optionalEnv("PORT", "3000")),
-  databaseUrl: requireEnv("DATABASE_URL"),
-  databaseName: optionalEnv("MONGODB_DATABASE", "cloverapp"),
+  databaseUrl: resolveDatabaseUrl(),
+  databaseName: optionalEnv("MONGODB_DATABASE", databaseName),
+  mongo: {
+    serverSelectionTimeoutMs: Number(optionalEnv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "10000")),
+    tlsCertificateKeyFile: mongoClientCertificateKeyFile(),
+    usesDerivedPasswordAuth: (() => {
+      const rawDatabaseUrl = optionalEnv("DATABASE_URL") || optionalEnv("MONGODB_CONNECTIONSTRING") || "";
+      return rawDatabaseUrl.includes("MONGODB-X509") && !hasMongoClientCertificateConfig() && Boolean(optionalEnv("MONGODB_USERNAME") && optionalEnv("MONGODB_PASSWORD"));
+    })(),
+    source: "live"
+  },
   encryptionKeyBase64: requireEnv("APP_ENCRYPTION_KEY_BASE64"),
   bootstrapAdmin: {
     username: optionalEnv("BOOTSTRAP_ADMIN_USERNAME", "admin"),
@@ -108,6 +166,60 @@ module.exports = {
       apiKey: optionalEnv("FLUIDPAY_API_KEY"),
       processorId: optionalEnv("FLUIDPAY_PROCESSOR_ID"),
       timeoutMs: Number(optionalEnv("FLUIDPAY_TIMEOUT_MS", "180000"))
+    },
+    braintree: {
+      environment: braintreeEnv,
+      baseUrl: optionalEnv(
+        "BRAINTREE_GRAPHQL_URL",
+        braintreeEnv === "production"
+          ? "https://payments.braintree-api.com/graphql"
+          : "https://payments.sandbox.braintree-api.com/graphql"
+      ),
+      merchantId: optionalEnv("BRAINTREE_MERCHANT_ID"),
+      publicKey: optionalEnv("BRAINTREE_PUBLIC_KEY"),
+      privateKey: optionalEnv("BRAINTREE_PRIVATE_KEY"),
+      merchantAccountId: optionalEnv("BRAINTREE_MERCHANT_ACCOUNT_ID"),
+      timeoutMs: Number(optionalEnv("BRAINTREE_TIMEOUT_MS", "180000"))
+    },
+    nmi: {
+      baseUrl: optionalEnv(
+        "NMI_API_BASE_URL",
+        nmiEnv === "sandbox" ? "https://secure.nmi.com" : "https://secure.nmi.com"
+      ),
+      paymentApiKey: optionalEnv("NMI_PAYMENT_API_KEY") || optionalEnv("NMI_SECURITY_KEY") || optionalEnv("NMI_API_SECURITY_KEY") || optionalEnv("NMI_PRIVATE_KEY"),
+      clientKey: optionalEnv("NMI_CLIENT_KEY") || optionalEnv("NMI_TOKENIZATION_KEY") || optionalEnv("NMI_CHECKOUT_KEY"),
+      clientSecret: optionalEnv("NMI_CLIENT_SECRET") || optionalEnv("NMI_API_PASSWORD"),
+      componentTokenKey: optionalEnv("NMI_COMPONENT_TOKEN_KEY"),
+      timeoutMs: Number(optionalEnv("NMI_TIMEOUT_MS", "180000")),
+      transactionPath: optionalEnv("NMI_TRANSACTION_PATH", "/api/transact.php"),
+      queryPath: optionalEnv("NMI_QUERY_PATH", "/api/query.php"),
+      defaultBillingCountry: optionalEnv("NMI_DEFAULT_BILLING_COUNTRY", "US")
+    },
+    zoho: {
+      baseUrl: optionalEnv("ZOHO_PAYMENTS_API_BASE_URL") ||
+        optionalEnv("ZOHO_PAYMENT_API_BASE_URL") ||
+        optionalEnv("ZOHO_API_BASE_URL") ||
+        (zohoPaymentsEnv === "sandbox" ? optionalEnv("ZOHO_PAYMENTS_SANDBOX_API_BASE_URL") : ""),
+      accountsUrl: optionalEnv("ZOHO_ACCOUNTS_BASE_URL", "https://accounts.zoho.com"),
+      apiKey: optionalEnv("ZOHO_PAYMENTS_API_KEY") || optionalEnv("ZOHO_PAYMENT_API_KEY") || optionalEnv("ZOHO_API_KEY"),
+      accessToken: optionalEnv("ZOHO_PAYMENTS_ACCESS_TOKEN") || optionalEnv("ZOHO_ACCESS_TOKEN"),
+      clientId: optionalEnv("ZOHO_PAYMENTS_CLIENT_ID") || optionalEnv("ZOHO_CLIENT_ID"),
+      clientSecret: optionalEnv("ZOHO_PAYMENTS_CLIENT_SECRET") || optionalEnv("ZOHO_CLIENT_SECRET"),
+      refreshToken: optionalEnv("ZOHO_PAYMENTS_REFRESH_TOKEN") || optionalEnv("ZOHO_REFRESH_TOKEN"),
+      organizationId: optionalEnv("ZOHO_PAYMENTS_ORGANIZATION_ID") || optionalEnv("ZOHO_ORGANIZATION_ID"),
+      accountId: optionalEnv("ZOHO_PAYMENTS_ACCOUNT_ID") || optionalEnv("ZOHO_ACCOUNT_ID"),
+      timeoutMs: Number(optionalEnv("ZOHO_PAYMENTS_TIMEOUT_MS") || optionalEnv("ZOHO_TIMEOUT_MS", "180000")),
+      paths: {
+        status: optionalEnv("ZOHO_PAYMENTS_STATUS_PATH") || optionalEnv("ZOHO_STATUS_PATH"),
+        test: optionalEnv("ZOHO_PAYMENTS_TEST_PATH") || optionalEnv("ZOHO_TEST_PATH"),
+        sale: optionalEnv("ZOHO_PAYMENTS_SALE_PATH") || optionalEnv("ZOHO_SALE_PATH"),
+        authorize: optionalEnv("ZOHO_PAYMENTS_AUTH_PATH") || optionalEnv("ZOHO_AUTH_PATH"),
+        verification: optionalEnv("ZOHO_PAYMENTS_VERIFY_PATH") || optionalEnv("ZOHO_VERIFY_PATH"),
+        capture: optionalEnv("ZOHO_PAYMENTS_CAPTURE_PATH") || optionalEnv("ZOHO_CAPTURE_PATH"),
+        refund: optionalEnv("ZOHO_PAYMENTS_REFUND_PATH") || optionalEnv("ZOHO_REFUND_PATH"),
+        void: optionalEnv("ZOHO_PAYMENTS_VOID_PATH") || optionalEnv("ZOHO_VOID_PATH"),
+        transaction: optionalEnv("ZOHO_PAYMENTS_TRANSACTION_PATH") || optionalEnv("ZOHO_TRANSACTION_PATH")
+      }
     },
     globalpayments: {
       mode: globalPaymentsMode,

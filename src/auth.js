@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { query } = require("./db");
+const { query, db } = require("./db");
 const env = require("./config/env");
 
 const SESSION_TTL_DAYS = 7;
@@ -16,7 +16,9 @@ const ROLE_PERMISSIONS = {
     canRunBinCheck: true,
     canRunBalanceCheck: true,
     canViewBalance: true,
-    canRunAuthCheck: true
+    canRunAuthCheck: true,
+    canRunProcessorActions: true,
+    canViewProcessorDebug: true
   },
   operator: {
     canManageUsers: false,
@@ -29,7 +31,9 @@ const ROLE_PERMISSIONS = {
     canRunBinCheck: true,
     canRunBalanceCheck: true,
     canViewBalance: false,
-    canRunAuthCheck: false
+    canRunAuthCheck: false,
+    canRunProcessorActions: false,
+    canViewProcessorDebug: false
   },
   customer: {
     canManageUsers: false,
@@ -42,7 +46,9 @@ const ROLE_PERMISSIONS = {
     canRunBinCheck: false,
     canRunBalanceCheck: false,
     canViewBalance: false,
-    canRunAuthCheck: false
+    canRunAuthCheck: false,
+    canRunProcessorActions: false,
+    canViewProcessorDebug: false
   }
 };
 
@@ -107,6 +113,19 @@ async function ensureBootstrapAdmin() {
   );
 
   if (existing.rowCount > 0) {
+    const database = await db.getDb();
+    await database.collection("users").updateOne(
+      { username: env.bootstrapAdmin.username },
+      {
+        $set: {
+          role: "admin",
+          can_balance_check: true,
+          can_view_balance: true,
+          is_active: true,
+          updated_at: new Date().toISOString()
+        }
+      }
+    );
     return;
   }
 
