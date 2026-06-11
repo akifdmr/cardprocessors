@@ -29,6 +29,10 @@ function requireRapidApiBinCheckerKey() {
   return apiKey;
 }
 
+function getRapidApiBinCheckerKey() {
+  return process.env.RAPIDAPI_BIN_CHECKER_KEY || process.env.X_RAPIDAPI_KEY || null;
+}
+
 function getMissingNvpFields(nvp) {
   return [
     ["PAYPAL_API_USERNAME", nvp.username],
@@ -294,13 +298,17 @@ async function binCheckCard({ pan, bin, ip }) {
     : { bin: normalized };
 
   let response;
+  const rapidApiKey = getRapidApiBinCheckerKey();
   try {
+    if (!rapidApiKey) {
+      throw inputError("Missing RAPIDAPI_BIN_CHECKER_KEY");
+    }
     response = await axios.post(RAPIDAPI_BIN_CHECKER_URL, requestBody, {
       params: requestParams,
       headers: {
         "Content-Type": "application/json",
         "x-rapidapi-host": RAPIDAPI_BIN_CHECKER_HOST,
-        "x-rapidapi-key": requireRapidApiBinCheckerKey()
+        "x-rapidapi-key": rapidApiKey
       },
       timeout: 15000
     });

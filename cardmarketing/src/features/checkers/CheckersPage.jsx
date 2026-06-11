@@ -47,6 +47,9 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
 
   async function runBin(extra = {}) {
     const payload = withSavedCard({ ...form, ...extra })
+    if (!String(payload.bin || payload.pan || '').replace(/\D/g, '').slice(0, 6)) {
+      throw new Error('BIN/IIN için 6 rakam gerekli. Kayıtlı kartta ilk 6 yoksa Manual Card seçip BIN gir.')
+    }
     return api('/providers/paypal/manager/cards/bin-check', { method: 'POST', body: JSON.stringify(payload) })
   }
 
@@ -60,52 +63,64 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
       balance: { label: 'Balance check çalışıyor', variant: 'transaction', detail: 'Seçili kart için balance sorgusu gönderiliyor' },
       learning: { label: 'Card üretim modeli çalışıyor', variant: 'sequence', detail: 'Clover learning run başlatılıyor' },
     }
-    await withLoader(async () => {
-      setResult(null)
-      if (tab === 'ip' || tab === 'bin') {
-        setResult({ type: 'bin', data: await runBin() })
-        return
-      }
-      if (tab === 'live') {
-        const payload = withSavedCard({ ...form, amount: Number(moneyValue(form.amount || 0)) })
-        const provider = payload.provider || form.provider || 'paypal'
-        
-        const liveRequest = api('/provider-operations/cards', { 
-          method: 'POST', 
-          body: JSON.stringify({ ...payload, provider, operation: 'live', runBinCheck: true }) 
-        })
-
-        const [liveResp, bin] = await Promise.all([
-          liveRequest,
-          runBin(payload),
-        ])
-        setResult({ type: 'live', live: liveResp, bin })
-        await onRefreshCards()
-        return
-      }
-      if (tab === 'balance') {
-        const payload = withSavedCard({
-          ...form,
-          amount: form.amount ? Number(moneyValue(form.amount)) : undefined,
-          balanceAmount: form.balanceAmount ? Number(moneyValue(form.balanceAmount)) : undefined,
-        })
-        const provider = payload.provider || form.provider || 'manual'
-        
-        let balanceRequest
-        if (provider === 'manual') {
-          balanceRequest = api('/checkers/balance', { method: 'POST', body: JSON.stringify(payload) })
-        } else {
-          balanceRequest = api('/provider-operations/cards', { 
-            method: 'POST', 
-            body: JSON.stringify({ ...payload, provider, operation: 'balance' }) 
-          })
+    try {
+      await withLoader(async () => {
+        setResult(null)
+        if (tab === 'ip' || tab === 'bin') {
+          setResult({ type: 'bin', data: await runBin() })
+          return
         }
+        if (tab === 'live') {
+          const payload = withSavedCard({ ...form, amount: Number(moneyValue(form.amount || 0)) })
+          const provider = payload.provider || form.provider || 'paypal'
+          
+          const liveRequest = api('/provider-operations/cards', { 
+            method: 'POST', 
+            body: JSON.stringify({ ...payload, provider, operation: 'live', runBinCheck: true }) 
+          })
 
-        setResult({ type: 'simple', title: 'Balance Check', data: await balanceRequest })
-        await onRefreshCards()
-        return
-      }
-    }, loaderByTab[tab] || { label: 'Checker çalışıyor', variant: 'default' })
+          const [liveResp, bin] = await Promise.all([
+            liveRequest,
+            runBin(payload),
+          ])
+          setResult({ type: 'live', live: liveResp, bin })
+          await onRefreshCards()
+          return
+        }
+        if (tab === 'balance') {
+          const payload = withSavedCard({
+            ...form,
+            amount: form.amount ? Number(moneyValue(form.amount)) : undefined,
+            balanceAmount: form.balanceAmount ? Number(moneyValue(form.balanceAmount)) : undefined,
+          })
+          const provider = payload.provider || form.provider || 'manual'
+          
+          let balanceRequest
+          if (provider === 'manual') {
+            balanceRequest = api('/checkers/balance', { method: 'POST', body: JSON.stringify(payload) })
+          } else {
+            balanceRequest = api('/provider-operations/cards', { 
+              method: 'POST', 
+              body: JSON.stringify({ ...payload, provider, operation: 'balance' }) 
+            })
+          }
+
+          setResult({ type: 'simple', title: 'Balance Check', data: await balanceRequest })
+          await onRefreshCards()
+          return
+        }
+      }, loaderByTab[tab] || { label: 'Checker çalışıyor', variant: 'default' })
+    } catch (error) {
+      setResult({
+        type: 'simple',
+        title: 'Checker Error',
+        data: {
+          status: 'failed',
+          responseMessage: error.message,
+          statusCode: error.status,
+        },
+      })
+    }
   }
 
   if (tab === 'learning') {
