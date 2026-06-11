@@ -2,11 +2,14 @@ const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const { getProviderConfig } = require("../providers");
 const { validateCardInput } = require("./cardValidationService");
+const { getProviderMessage } = require("../utils/errorUtils");
 
 const RAPIDAPI_BIN_CHECKER_HOST =
   process.env.RAPIDAPI_BIN_CHECKER_HOST || "bin-ip-checker.p.rapidapi.com";
 const RAPIDAPI_BIN_CHECKER_URL =
   process.env.RAPIDAPI_BIN_CHECKER_URL || `https://${RAPIDAPI_BIN_CHECKER_HOST}/`;
+const BIN_CHECKER_FALLBACK_URL =
+  process.env.BIN_CHECKER_FALLBACK_URL || "https://lookup.binlist.net";
 
 function getPayPalConfig() {
   return getProviderConfig("paypal");
@@ -290,15 +293,74 @@ async function binCheckCard({ pan, bin, ip }) {
     ? { bin: normalized, ip: lookupIp }
     : { bin: normalized };
 
-  const response = await axios.post(RAPIDAPI_BIN_CHECKER_URL, requestBody, {
-    params: requestParams,
-    headers: {
-      "Content-Type": "application/json",
-      "x-rapidapi-host": RAPIDAPI_BIN_CHECKER_HOST,
-      "x-rapidapi-key": requireRapidApiBinCheckerKey()
-    },
-    timeout: 15000
-  });
+  let response;
+  try {
+    response = await axios.post(RAPIDAPI_BIN_CHECKER_URL, requestBody, {
+      params: requestParams,
+      headers: {
+        "Content-Type": "application/json",
+        "x-rapidapi-host": RAPIDAPI_BIN_CHECKER_HOST,
+        "x-rapidapi-key": requireRapidApiBinCheckerKey()
+      },
+      timeout: 15000
+    });
+  } catch (rapidApiError) {
+    try {
+      const fallback = await axios.get(`${BIN_CHECKER_FALLBACK_URL.replace(/\/+$/, "")}/${normalized}`, {
+        headers: { accept: "application/json" },
+        timeout: 15000
+      });
+      const fallbackData = {
+        data: {
+          number: fallback.data?.number?.iin || normalized,
+          length: fallback.data?.number?.length || normalized.length,
+          scheme: fallback.data?.scheme,
+          brand: fallback.data?.brand,
+          type: fallback.data?.type,
+          is_prepaid: fallback.data?.prepaid,
+          country: {
+            name: fallback.data?.country?.name,
+            alpha2: fallback.data?.country?.alpha2,
+            currency: fallback.data?.country?.currency,
+            emoji: fallback.data?.country?.emoji
+          },
+          bank: {
+            name: fallback.data?.bank?.name,
+            website: fallback.data?.bank?.url,
+            phone: fallback.data?.bank?.phone
+          }
+        }
+      };
+      return {
+        status: "passed",
+        bin: normalized,
+        ip: lookupIp || null,
+        summary: summarizeBinDetails(normalized, fallbackData),
+        details: formatBinDetails(normalized, fallbackData),
+        ipDetails: lookupIp ? formatIpDetails({}) : null,
+        source: "binlist_fallback",
+        providerWarning: getProviderMessage(rapidApiError),
+        raw: fallback.data || {}
+      };
+    } catch (fallbackError) {
+      const providerMessage = getProviderMessage(rapidApiError);
+      return {
+        status: "failed",
+        bin: normalized,
+        ip: lookupIp || null,
+        responseMessage: providerMessage,
+        failureReason: providerMessage,
+        resultCode: rapidApiError?.response?.status === 429 ? "RAPIDAPI_QUOTA_EXCEEDED" : "BIN_CHECK_FAILED",
+        providerStatus: rapidApiError?.response?.status || null,
+        fallbackError: getProviderMessage(fallbackError),
+        summary: summarizeBinDetails(normalized, {}),
+        details: formatBinDetails(normalized, {}),
+        ipDetails: lookupIp ? formatIpDetails({}) : null,
+        source: "rapidapi_bin_ip_checker",
+        raw: rapidApiError?.response?.data || null
+      };
+    }
+  }
 
   const responseData = response.data || {};
   const lookup = getBinPayload(responseData);
