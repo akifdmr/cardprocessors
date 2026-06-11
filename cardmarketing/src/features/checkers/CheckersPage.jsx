@@ -74,15 +74,24 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
           const payload = withSavedCard({ ...form, amount: Number(moneyValue(form.amount || 0)) })
           const provider = payload.provider || form.provider || 'paypal'
           
-          const liveRequest = api('/provider-operations/cards', { 
+          const liveResp = await api('/provider-operations/cards', { 
             method: 'POST', 
-            body: JSON.stringify({ ...payload, provider, operation: 'live', runBinCheck: true }) 
+            body: JSON.stringify({ ...payload, provider, operation: 'live' }) 
           })
 
-          const [liveResp, bin] = await Promise.all([
-            liveRequest,
-            runBin(payload),
-          ])
+          let bin
+          try {
+            bin = await runBin(payload)
+          } catch {
+            const normalizedBin = String(payload.bin || payload.pan || '').replace(/\D/g, '').slice(0, 6)
+            bin = {
+              status: 'skipped',
+              bin: normalizedBin || null,
+              summary: normalizedBin ? { bin: normalizedBin } : {},
+              details: normalizedBin ? { 'BIN/IIN': normalizedBin } : {},
+              source: 'live_check_without_bin',
+            }
+          }
           setResult({ type: 'live', live: liveResp, bin })
           await onRefreshCards()
           return
