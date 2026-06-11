@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
+import { PaginationControls, usePagination } from '../../components/common/Pagination'
 import { formatCardLabel, formatMoneyInput, moneyValue, statusClass } from '../../utils/format'
 
 function attemptStatus(checks, type) {
@@ -36,12 +37,8 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
   const [enrollment, setEnrollment] = useState(null)
   const [actionPrompt, setActionPrompt] = useState(null)
   const [catalog, setCatalog] = useState(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
   const withLoader = runAction || ((task) => task())
-  const pageCount = Math.max(1, Math.ceil(cards.length / pageSize))
-  const safePage = Math.min(page, pageCount)
-  const visibleCards = cards.slice((safePage - 1) * pageSize, safePage * pageSize)
+  const cardPagination = usePagination(cards, 25)
 
   useEffect(() => {
     api('/provider-operations/catalog').then(setCatalog).catch(console.error)
@@ -248,17 +245,7 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
           <p className="eyebrow">Records</p>
           <h3>Cards</h3>
         </div>
-        <div className="pagination-controls">
-          <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-          <button className="ghost small" type="button" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Önceki</button>
-          <span className="muted">{safePage}/{pageCount}</span>
-          <button className="ghost small" type="button" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Sonraki</button>
-        </div>
+        <PaginationControls pagination={cardPagination} />
       </div>
       <div className="table-wrap">
         <table className="processor-table">
@@ -270,7 +257,7 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
             </tr>
           </thead>
           <tbody>
-            {visibleCards.map((card) => {
+            {cardPagination.visibleItems.map((card) => {
               return (
                 <tr key={card.id}>
                   <td>{formatCardLabel(card)}</td>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
+import { PaginationControls, usePagination } from '../../components/common/Pagination'
 import { formatMoneyInput, moneyValue, statusClass } from '../../utils/format'
 
 const tabs = [
@@ -204,12 +205,7 @@ export function DebtManagementPage({ runAction }) {
             <button className="primary full" type="submit">Hesabı Kaydet</button>
           </form>
         </section>
-        <section className="panel">
-          <div className="section-head"><div><p className="eyebrow">Accounts</p><h3>Kayıtlı Hesaplar</h3></div></div>
-          <div className="table-wrap"><table><thead><tr><th>Bank</th><th>Type</th><th>Owner</th><th>Account</th><th>Total Paid</th><th></th></tr></thead><tbody>{accounts.map((account) => (
-            <tr key={account.id}><td>{account.bankName}</td><td>{account.accountType}</td><td>{account.ownershipType}</td><td>{account.accountMasked}</td><td>{money(account.totalPaid)}</td><td><button className="ghost small" type="button" onClick={() => setSelected({ type: 'account', item: account })}>Open</button></td></tr>
-          ))}</tbody></table></div>
-        </section>
+        <FundingAccountTable accounts={accounts} onOpen={(account) => setSelected({ type: 'account', item: account })} />
       </div>
     )
   }
@@ -239,12 +235,7 @@ export function DebtManagementPage({ runAction }) {
             <button className="primary full" type="submit">Kartı Kaydet</button>
           </form>
         </section>
-        <section className="panel">
-          <div className="section-head"><div><p className="eyebrow">Cards</p><h3>Ödenecek Kartlar</h3></div></div>
-          <div className="table-wrap"><table><thead><tr><th>Owner</th><th>Bank</th><th>Limit</th><th>Paid</th><th>Repay Due</th><th></th></tr></thead><tbody>{cards.map((card) => (
-            <tr key={card.id}><td>{card.ownerName}</td><td>{card.bankName} {card.cardLast4 ? `••${card.cardLast4}` : ''}</td><td>{money(card.creditLimit)}</td><td>{money(card.totalPaid)}</td><td>{money(card.repaymentDueTotal)}</td><td><button className="ghost small" type="button" onClick={() => setSelected({ type: 'card', item: card })}>Open</button></td></tr>
-          ))}</tbody></table></div>
-        </section>
+        <DebtCardTable cards={cards} onOpen={(card) => setSelected({ type: 'card', item: card })} />
       </div>
     )
   }
@@ -302,14 +293,64 @@ export function DebtManagementPage({ runAction }) {
   )
 }
 
+function FundingAccountTable({ accounts, onOpen }) {
+  const pagination = usePagination(accounts, 10)
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <div><p className="eyebrow">Accounts</p><h3>Kayıtlı Hesaplar</h3></div>
+        <PaginationControls pagination={pagination} pageSizes={[10, 25, 50]} label="Hesap sayfa boyutu" />
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Bank</th><th>Type</th><th>Owner</th><th>Account</th><th>Total Paid</th><th></th></tr></thead>
+          <tbody>
+            {pagination.visibleItems.map((account) => (
+              <tr key={account.id}><td>{account.bankName}</td><td>{account.accountType}</td><td>{account.ownershipType}</td><td>{account.accountMasked}</td><td>{money(account.totalPaid)}</td><td><button className="ghost small" type="button" onClick={() => onOpen(account)}>Open</button></td></tr>
+            ))}
+            {!pagination.visibleItems.length ? <tr><td colSpan="6" className="muted">Kayıtlı hesap yok.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function DebtCardTable({ cards, onOpen }) {
+  const pagination = usePagination(cards, 10)
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <div><p className="eyebrow">Cards</p><h3>Ödenecek Kartlar</h3></div>
+        <PaginationControls pagination={pagination} pageSizes={[10, 25, 50]} label="Kart sayfa boyutu" />
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Owner</th><th>Bank</th><th>Limit</th><th>Paid</th><th>Repay Due</th><th></th></tr></thead>
+          <tbody>
+            {pagination.visibleItems.map((card) => (
+              <tr key={card.id}><td>{card.ownerName}</td><td>{card.bankName} {card.cardLast4 ? `••${card.cardLast4}` : ''}</td><td>{money(card.creditLimit)}</td><td>{money(card.totalPaid)}</td><td>{money(card.repaymentDueTotal)}</td><td><button className="ghost small" type="button" onClick={() => onOpen(card)}>Open</button></td></tr>
+            ))}
+            {!pagination.visibleItems.length ? <tr><td colSpan="6" className="muted">Ödenecek kart yok.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function PaymentTable({ payments, onUpdate, framed = true }) {
+  const pagination = usePagination(payments, framed ? 10 : 5)
   return (
     <section className={framed ? 'panel' : 'debt-inline-table'}>
-      <div className="section-head"><div><p className="eyebrow">Ledger</p><h3>Ödeme Kayıtları</h3></div></div>
+      <div className="section-head">
+        <div><p className="eyebrow">Ledger</p><h3>Ödeme Kayıtları</h3></div>
+        <PaginationControls pagination={pagination} pageSizes={framed ? [10, 25, 50] : [5, 10, 25]} label="Ödeme sayfa boyutu" />
+      </div>
       <div className="table-wrap">
         <table>
           <thead><tr><th>Date</th><th>Card</th><th>Source</th><th>Type</th><th>Amount</th><th>Status</th><th>Repay Due</th><th>Repay</th><th></th></tr></thead>
-          <tbody>{payments.map((payment) => (
+          <tbody>{pagination.visibleItems.map((payment) => (
             <tr key={payment.id}>
               <td>{payment.paymentDate}</td>
               <td>{payment.card?.ownerName || '-'} / {payment.card?.bankName || '-'}</td>
@@ -324,7 +365,9 @@ function PaymentTable({ payments, onUpdate, framed = true }) {
                 <button className="ghost small" type="button" onClick={() => onUpdate(payment, { repaymentPaidAmount: payment.repaymentExpectedAmount, repaymentStatus: 'paid', repaymentDate: new Date().toISOString().slice(0, 10) })}>Paid Back</button>
               </td>
             </tr>
-          ))}</tbody>
+          ))}
+            {!pagination.visibleItems.length ? <tr><td colSpan="9" className="muted">Ödeme kaydı yok.</td></tr> : null}
+          </tbody>
         </table>
       </div>
     </section>

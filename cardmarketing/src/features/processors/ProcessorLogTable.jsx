@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PaginationControls, usePagination } from '../../components/common/Pagination'
 import { formatCardLabel, statusClass } from '../../utils/format'
 import { processorTransactionId } from './actions/logActions'
 import { ProcessorRowActions } from './ProcessorRowActions'
@@ -85,11 +86,7 @@ function JsonModal({ title, value, onClose }) {
 
 export function ProcessorLogTable({ logs = [], canViewJson, onAction }) {
   const [jsonModal, setJsonModal] = useState(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
-  const pageCount = Math.max(1, Math.ceil(logs.length / pageSize))
-  const safePage = Math.min(page, pageCount)
-  const visibleLogs = logs.slice((safePage - 1) * pageSize, safePage * pageSize)
+  const logPagination = usePagination(logs, 25)
 
   return (
     <section className="panel wide">
@@ -98,17 +95,7 @@ export function ProcessorLogTable({ logs = [], canViewJson, onAction }) {
           <p className="eyebrow">Logs</p>
           <h3>İşlem Listesi</h3>
         </div>
-        <div className="pagination-controls">
-          <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} aria-label="Sayfa boyutu">
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-          <button className="ghost small" type="button" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Önceki</button>
-          <span className="muted">{safePage}/{pageCount}</span>
-          <button className="ghost small" type="button" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Sonraki</button>
-        </div>
+        <PaginationControls pagination={logPagination} label="Log sayfa boyutu" />
       </div>
       <div className="table-wrap">
         <table className="processor-table processor-log-table">
@@ -126,7 +113,7 @@ export function ProcessorLogTable({ logs = [], canViewJson, onAction }) {
             </tr>
           </thead>
           <tbody>
-            {visibleLogs.map((log, index) => {
+            {logPagination.visibleItems.map((log, index) => {
               const tx = processorTransactionId(log)
               const provider = log.processor || log.provider
               const key = logKey(log, index)

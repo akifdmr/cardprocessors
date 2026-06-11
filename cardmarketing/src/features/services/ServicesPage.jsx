@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { ResultCard } from '../../components/common/Details'
+import { PaginationControls, usePagination } from '../../components/common/Pagination'
 
 const emptyMask = { realFrom: '', realTo: '' }
 const emptyCall = { realFrom: '', realTo: '' }
@@ -12,13 +13,9 @@ export function ServicesPage({ runAction }) {
   const [resolveForm, setResolveForm] = useState(emptyResolve)
   const [result, setResult] = useState(null)
   const [numbers, setNumbers] = useState(null)
-  const [numbersPage, setNumbersPage] = useState(1)
-  const [numbersPageSize, setNumbersPageSize] = useState(25)
   const withLoader = runAction || ((task) => task())
   const numberRows = numbers?.data || []
-  const numbersPageCount = Math.max(1, Math.ceil(numberRows.length / numbersPageSize))
-  const safeNumbersPage = Math.min(numbersPage, numbersPageCount)
-  const visibleNumbers = numberRows.slice((safeNumbersPage - 1) * numbersPageSize, safeNumbersPage * numbersPageSize)
+  const numbersPagination = usePagination(numberRows, 25)
 
   async function loadNumbers() {
     try {
@@ -107,17 +104,12 @@ export function ServicesPage({ runAction }) {
             <p className="eyebrow">Numbers</p>
             <h3>Card Phone Numbers</h3>
           </div>
-          <div className="pagination-controls">
-            <select value={numbersPageSize} onChange={(event) => { setNumbersPageSize(Number(event.target.value)); setNumbersPage(1) }}>
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
-            <button className="ghost small" type="button" disabled={safeNumbersPage <= 1} onClick={() => setNumbersPage((value) => Math.max(1, value - 1))}>Önceki</button>
-            <span className="muted">{safeNumbersPage}/{numbersPageCount}</span>
-            <button className="ghost small" type="button" disabled={safeNumbersPage >= numbersPageCount} onClick={() => setNumbersPage((value) => Math.min(numbersPageCount, value + 1))}>Sonraki</button>
-            <button className="ghost small" type="button" onClick={() => withLoader(loadNumbers, { label: 'Numara listesi yenileniyor', variant: 'logs', detail: 'Kart telefon kayıtları alınıyor' })}>Refresh</button>
-          </div>
+          <PaginationControls
+            pagination={numbersPagination}
+            pageSizes={[10, 25, 50]}
+            label="Numara sayfa boyutu"
+            extra={<button className="ghost small" type="button" onClick={() => withLoader(loadNumbers, { label: 'Numara listesi yenileniyor', variant: 'logs', detail: 'Kart telefon kayıtları alınıyor' })}>Refresh</button>}
+          />
         </div>
         <div className="table-wrap">
           <table className="processor-table">
@@ -131,7 +123,7 @@ export function ServicesPage({ runAction }) {
               </tr>
             </thead>
             <tbody>
-              {visibleNumbers.map((item) => (
+              {numbersPagination.visibleItems.map((item) => (
                 <tr key={item.id}>
                   <td className="mono">{item.phoneNumber}</td>
                   <td className="mono">{item.maskedNumber}</td>
@@ -140,7 +132,7 @@ export function ServicesPage({ runAction }) {
                   <td>{item.addedBy || '-'}</td>
                 </tr>
               ))}
-              {!visibleNumbers.length ? <tr><td colSpan="5" className="muted">{numbers?.error || 'Kayıt yok veya yetki yok.'}</td></tr> : null}
+              {!numbersPagination.visibleItems.length ? <tr><td colSpan="5" className="muted">{numbers?.error || 'Kayıt yok veya yetki yok.'}</td></tr> : null}
             </tbody>
           </table>
         </div>

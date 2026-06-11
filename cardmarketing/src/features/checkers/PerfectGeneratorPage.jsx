@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { ResultCard } from '../../components/common/Details'
+import { PaginationControls, usePagination } from '../../components/common/Pagination'
 import { statusClass } from '../../utils/format'
 
 function digitsOnly(value) {
@@ -49,6 +50,7 @@ function successfulRows(run) {
 
 function GeneratorLogModal({ run, onClose }) {
   const rows = successfulRows(run)
+  const pagination = usePagination(rows, 10)
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <article className="modal panel" role="dialog" aria-modal="true" aria-label="Generator logları" onClick={(event) => event.stopPropagation()}>
@@ -59,6 +61,7 @@ function GeneratorLogModal({ run, onClose }) {
           </div>
           <button className="ghost small" type="button" onClick={onClose}>Kapat</button>
         </div>
+        <PaginationControls pagination={pagination} pageSizes={[10, 25, 50]} label="Başarılı deneme sayfa boyutu" />
         <div className="summary full">
           <div><span>Girilen Seri</span><strong>{formatDigitSeries(run?.input?.bin) || '-'}</strong></div>
           <div><span>İstenen Adet</span><strong>{run?.output?.requestedCount ?? '-'}</strong></div>
@@ -82,7 +85,7 @@ function GeneratorLogModal({ run, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
+              {pagination.visibleItems.map((row, index) => (
                 <tr key={`${row.pan || row.maskedPan || 'card'}-${row.attempt || index}`}>
                   <td>{row.attempt || index + 1}</td>
                   <td className="mono">{row.pan || row.maskedPan || '-'}</td>
@@ -96,7 +99,7 @@ function GeneratorLogModal({ run, onClose }) {
                   <td className="mono">{row.chargeIdMasked || '-'}</td>
                 </tr>
               ))}
-              {!rows.length ? <tr><td colSpan="10" className="muted">Başarılı deneme yok.</td></tr> : null}
+              {!pagination.visibleItems.length ? <tr><td colSpan="10" className="muted">Başarılı deneme yok.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -106,11 +109,7 @@ function GeneratorLogModal({ run, onClose }) {
 }
 
 function GeneratorHistoryTable({ runs, onOpenLogs, loading }) {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const pageCount = Math.max(1, Math.ceil(runs.length / pageSize))
-  const safePage = Math.min(page, pageCount)
-  const visible = runs.slice((safePage - 1) * pageSize, safePage * pageSize)
+  const pagination = usePagination(runs, 10)
 
   return (
     <section className="panel wide">
@@ -119,16 +118,7 @@ function GeneratorHistoryTable({ runs, onOpenLogs, loading }) {
           <p className="eyebrow">Generator History</p>
           <h3>Geçmiş Generate Listesi</h3>
         </div>
-        <div className="pagination-controls">
-          <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-          </select>
-          <button className="ghost small" type="button" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Önceki</button>
-          <span className="muted">{safePage}/{pageCount}</span>
-          <button className="ghost small" type="button" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Sonraki</button>
-        </div>
+        <PaginationControls pagination={pagination} pageSizes={[10, 25, 50]} label="Generator geçmiş sayfa boyutu" />
       </div>
       <div className="table-wrap">
         <table className="processor-table dynamic-table">
@@ -146,7 +136,7 @@ function GeneratorHistoryTable({ runs, onOpenLogs, loading }) {
             </tr>
           </thead>
           <tbody>
-            {visible.map((run) => (
+            {pagination.visibleItems.map((run) => (
               <tr key={run.runId}>
                 <td>{run.completedAt ? new Date(run.completedAt).toLocaleString() : '-'}</td>
                 <td className="mono">{formatDigitSeries(run.input?.bin) || '-'}</td>
@@ -159,7 +149,7 @@ function GeneratorHistoryTable({ runs, onOpenLogs, loading }) {
                 <td><button className="ghost small" type="button" onClick={() => onOpenLogs(run)}>Tüm Log</button></td>
               </tr>
             ))}
-            {!visible.length ? <tr><td colSpan="9" className="muted">{loading ? 'Generator geçmişi yükleniyor.' : 'Geçmiş generate kaydı yok.'}</td></tr> : null}
+            {!pagination.visibleItems.length ? <tr><td colSpan="9" className="muted">{loading ? 'Generator geçmişi yükleniyor.' : 'Geçmiş generate kaydı yok.'}</td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -254,6 +244,7 @@ export function PerfectGeneratorPanel({ runAction, onRefreshCards }) {
   }
 
   const validCards = result?.output?.validCards || result?.output?.cards || []
+  const resultPagination = usePagination(validCards, 10)
 
   return (
     <div className="page-stack">
@@ -323,6 +314,7 @@ export function PerfectGeneratorPanel({ runAction, onRefreshCards }) {
                 <p className="eyebrow">Results</p>
                 <h3>Başarılı Sonuçlar</h3>
               </div>
+              <PaginationControls pagination={resultPagination} pageSizes={[10, 25, 50]} label="Başarılı sonuç sayfa boyutu" />
             </div>
             <div className="table-wrap">
               <table className="processor-table">
@@ -338,7 +330,7 @@ export function PerfectGeneratorPanel({ runAction, onRefreshCards }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {validCards.map((card, index) => (
+                  {resultPagination.visibleItems.map((card, index) => (
                     <tr key={`${card.pan || card.maskedPan || 'card'}-${index}`}>
                       <td className="mono">{card.pan || card.maskedPan || '-'}</td>
                       <td className="mono">{card.cvv || '-'}</td>
@@ -349,7 +341,7 @@ export function PerfectGeneratorPanel({ runAction, onRefreshCards }) {
                       <td><span className={`pill ${statusClass(card.chargeSuccess ? 'success' : 'failed')}`}>{card.chargeSuccess ? 'ok' : '-'}</span></td>
                     </tr>
                   ))}
-                  {!validCards.length ? (
+                  {!resultPagination.visibleItems.length ? (
                     <tr><td colSpan="7" className="muted">Başarılı sonuç yok.</td></tr>
                   ) : null}
                 </tbody>
