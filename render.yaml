@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: cardmarket
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install && npm run build:deploy
+    startCommand: npm run start:deploy
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: MONGODB_USE_REMOTE
+        value: "true"
+      - key: MONGODB_USE_ATLAS
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: MONGODB_DATABASE
+        sync: false
+      - key: APP_ENCRYPTION_KEY_BASE64
+        sync: false
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_DISPLAY_NAME
+        sync: false
+      - key: RAPIDAPI_BIN_CHECKER_KEY
+        sync: false
+      - key: BRAINTREE_ENV
+        value: sandbox
+      - key: BRAINTREE_MERCHANT_ID
+        sync: false
+      - key: BRAINTREE_PUBLIC_KEY
+        sync: false
+      - key: BRAINTREE_PRIVATE_KEY
+        sync: false
+      - key: BRAINTREE_MERCHANT_ACCOUNT_ID
+        sync: false

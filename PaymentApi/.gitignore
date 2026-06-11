@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+.env
+.env.*
+!.env.example
+.tmp/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store

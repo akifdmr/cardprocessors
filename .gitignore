@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+PaymentApi/public/react/
+
+# Local/runtime files
+.tmp/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+
+# IDE files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Backups
+*.backup
+.git.backup-*

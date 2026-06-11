@@ -1,0 +1,57 @@
+{
+  "name": "cardmarket-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/run-all.js --command=dev --env=development --service=all",
+    "dev:all": "node scripts/run-all.js --command=dev --env=development --service=all",
+    "dev:local": "node scripts/run-all.js --command=dev --env=local --service=all",
+    "dev:development": "node scripts/run-all.js --command=dev --env=development --service=all",
+    "dev:production": "node scripts/run-all.js --command=dev --env=production --service=all",
+    "run": "node scripts/run-all.js --command=run --env=production --service=all",
+    "run:all": "node scripts/run-all.js --command=run --env=production --service=all",
+    "run:local": "node scripts/run-all.js --command=run --env=local --service=all",
+    "run:development": "node scripts/run-all.js --command=run --env=development --service=all",
+    "run:production": "node scripts/run-all.js --command=run --env=production --service=all",
+    "start": "npm run start:deploy",
+    "api:dev": "node scripts/run-all.js --command=dev --env=development --service=api",
+    "api:dev:local": "node scripts/run-all.js --command=dev --env=local --service=api",
+    "api:dev:development": "node scripts/run-all.js --command=dev --env=development --service=api",
+    "api:dev:production": "node scripts/run-all.js --command=dev --env=production --service=api",
+    "api:run": "node scripts/run-all.js --command=run --env=production --service=api",
+    "api:run:local": "node scripts/run-all.js --command=run --env=local --service=api",
+    "api:run:development": "node scripts/run-all.js --command=run --env=development --service=api",
+    "api:run:production": "node scripts/run-all.js --command=run --env=production --service=api",
+    "react:dev": "node scripts/run-all.js --command=dev --env=development --service=react",
+    "react:dev:local": "node scripts/run-all.js --command=dev --env=local --service=react",
+    "react:dev:development": "node scripts/run-all.js --command=dev --env=development --service=react",
+    "react:dev:production": "node scripts/run-all.js --command=dev --env=production --service=react",
+    "react:run": "node scripts/run-all.js --command=run --env=production --service=react",
+    "react:run:local": "node scripts/run-all.js --command=run --env=local --service=react",
+    "react:run:development": "node scripts/run-all.js --command=run --env=development --service=react",
+    "react:run:production": "node scripts/run-all.js --command=run --env=production --service=react",
+    "ollama:pull": "ollama pull qwen2.5:7b",
+    "build:api": "npm --prefix PaymentApi run build",
+    "build:react": "npm --prefix cardmarketing run build",
+    "build:all": "npm run build:api && npm run build:react",
+    "build:deploy": "npm --prefix cardmarketing run build && npm --prefix PaymentApi run build",
+    "start:deploy": "NODE_ENV=production APP_ENV=production npm --prefix PaymentApi run db:migrate && NODE_ENV=production APP_ENV=production npm --prefix PaymentApi run start"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "scriptDescriptions": {
+    "dev": "Starts PaymentApi first, waits for /health, then starts the React dev server with NODE_ENV=development.",
+    "dev:*": "Starts the full solution in the selected env: local, development, or production.",
+    "run:*": "Starts the full solution in run mode with the selected env: local, development, or production.",
+    "api:dev:*": "Starts only PaymentApi in dev mode with the selected env.",
+    "api:run:*": "Starts only PaymentApi in run mode with the selected env.",
+    "react:dev:*": "Starts only cardmarketing in Vite dev mode with the selected env.",
+    "react:run:*": "Starts only cardmarketing in Vite preview mode with the selected env.",
+    "ollama:pull": "Pulls the default local Ollama model: qwen2.5:7b.",
+    "build:all": "Builds/checks both projects in order: PaymentApi, then cardmarketing."
+  },
+  "dependencies": {
+    "axios": "^1.17.0"
+  }
+}

@@ -1,0 +1,21 @@
+const env = require("../PaymentApi/src/config/env");
+const paypalService = require("../PaymentApi/src/services/paypalService");
+
+async function runTest() {
+  try {
+    const status = paypalService.getNvpStatus();
+    console.log("NVP Status:", status);
+    
+    if (status.configured) {
+      console.log("Testing NVP Connection...");
+      const result = await paypalService.testNvpConnection();
+      console.log("Test Result:", result);
+    } else {
+      console.log("PayPal NVP is not configured.");
+    }
+  } catch (error) {
+    console.error("Error:", error);
+  }
+}
+
+runTest();
