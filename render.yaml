@@ -3,7 +3,7 @@ services:
     name: cardmarket
     runtime: node
     plan: starter
-    buildCommand: npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install && npm run build:deploy
+    buildCommand: npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy
     startCommand: npm run start:deploy
     healthCheckPath: /health
     autoDeploy: false

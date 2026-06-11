@@ -17,7 +17,7 @@ Use Render as a single Node web service. The React app builds into `PaymentApi/p
 Render uses:
 
 ```sh
-npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install && npm run build:deploy
+npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy
 npm run start:deploy
 ```
 

@@ -24,7 +24,7 @@ Long-running Node process
 ## Build Command
 
 ```sh
-npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install && npm run build:deploy
+npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy
 ```
 
 ## Start Command
