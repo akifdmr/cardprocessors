@@ -9,7 +9,7 @@ import { PerfectGeneratorPanel } from './PerfectGeneratorPage'
 const tabs = [
   ['ip', 'IP Lookup'],
   ['bin', 'Card BIN Check'],
-  ['live', 'PayPal / Card Live Check'],
+  ['live', 'Card Live Check'],
   ['balance', 'Balance Check'],
   ['learning', 'Machine Learning / Card Üretim'],
 ]
@@ -59,7 +59,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     const loaderByTab = {
       ip: { label: 'IP/BIN istihbaratı çalışıyor', variant: 'auth', detail: 'BIN ve IP detayları sorgulanıyor' },
       bin: { label: 'Card BIN check çalışıyor', variant: 'auth', detail: 'Kart BIN bilgileri doğrulanıyor' },
-      live: { label: 'PayPal/Card live check çalışıyor', variant: 'sale', detail: 'Authorization ve BIN sorgusu birlikte çalışıyor' },
+      live: { label: 'Card live check çalışıyor', variant: 'sale', detail: 'Provider authorization ve BIN sorgusu birlikte çalışıyor' },
       balance: { label: 'Balance check çalışıyor', variant: 'transaction', detail: 'Seçili kart için balance sorgusu gönderiliyor' },
       learning: { label: 'Card üretim modeli çalışıyor', variant: 'sequence', detail: 'Clover learning run başlatılıyor' },
     }
@@ -157,16 +157,17 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
               <label className="full">
                 <span>Provider</span>
         <select value={form.provider || 'paypal'} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
+          <option value="paypal">PayPal</option>
           {catalog ? Object.values(catalog)
             .filter((p) => {
+              if (p.key === 'paypal') return false;
               if (!p.configured) return false;
-              return p.key === 'paypal' || p.methods?.some(m => ['verification', 'verify'].includes(m.operation));
+              return p.methods?.some(m => ['verification', 'verify', 'live'].includes(m.operation));
             })
             .map((p) => (
               <option key={p.key} value={p.key}>{p.label}</option>
                     )) : (
                       <>
-                        <option value="paypal">PayPal</option>
                         <option value="clover">Clover</option>
                         <option value="fluidpay">FluidPay</option>
                         <option value="globalpayments">Global Payments</option>
