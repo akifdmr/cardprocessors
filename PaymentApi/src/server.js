@@ -6318,6 +6318,79 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
   });
 }));
 
+app.post("/api/unchecked-cards/live-check-selected", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const ids = Array.isArray(req.body.ids)
+    ? [...new Set(req.body.ids.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [];
+  if (!ids.length) {
+    return res.status(400).json({ status: "failed", responseMessage: "At least one unchecked card id is required" });
+  }
+
+  const limit = Math.min(100, ids.length);
+  const delayMs = Math.min(5000, Math.max(0, Number(req.body.delayMs || 750)));
+  const mongo = await db.getDb();
+  const cards = await mongo.collection("uncheckedCards")
+    .find({ id: { $in: ids.slice(0, limit) } }, { projection: { _id: 0 } })
+    .toArray();
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const results = [];
+
+  for (const [index, id] of ids.slice(0, limit).entries()) {
+    const card = byId.get(id);
+    if (!card) {
+      results.push({ id, status: "not_found", live: false, error: "Unchecked card not found" });
+    } else if (!card.panEncrypted) {
+      results.push({ id, maskedPan: card.maskedPan, status: "skipped", live: false, error: "Card PAN is not available for live check" });
+    } else {
+      try {
+        results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body, userId: req.user?.id || null }));
+      } catch (error) {
+        const now = new Date().toISOString();
+        const operatorResult = uncheckedOperatorResult({ live: false, error });
+        await mongo.collection("uncheckedCards").updateOne(
+          { id: card.id },
+          {
+            $set: {
+              checked: true,
+              live: false,
+              operatorStatus: operatorResult.operatorStatus,
+              operatorMessage: operatorResult.operatorMessage,
+              lastCheck: {
+                provider: req.body.provider || card.provider || "clover",
+                operation: "live_then_bin",
+                httpStatus: error.statusCode || 500,
+                operatorStatus: operatorResult.operatorStatus,
+                operatorMessage: operatorResult.operatorMessage,
+                response: redactSensitiveReportData({ message: error.message })
+              },
+              updatedAt: now
+            }
+          }
+        );
+        results.push({
+          id: card.id,
+          maskedPan: card.maskedPan,
+          checked: true,
+          live: false,
+          ...operatorResult,
+          error: error.message
+        });
+      }
+    }
+
+    if (index < Math.min(limit, ids.length) - 1 && delayMs > 0) {
+      await sleep(delayMs);
+    }
+  }
+
+  res.json({
+    status: "completed",
+    requested: { count: ids.length, processedLimit: limit, delayMs },
+    processed: results.length,
+    results
+  });
+}));
+
 app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
   const start = Math.max(1, Number(req.body.start || req.body.from || 1));
   const end = Math.max(start, Number(req.body.end || req.body.to || start));
@@ -6609,6 +6682,61 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
   }
 
   const provider = normalizeProviderKey(req.body.provider || card.provider || "clover");
+  if (operation === "balance") {
+    const balanceAmount = req.body.balanceAmount == null || req.body.balanceAmount === ""
+      ? Number(req.body.amount)
+      : Number(req.body.balanceAmount);
+    if (!Number.isFinite(balanceAmount)) {
+      return res.status(400).json({
+        status: "failed",
+        responseMessage: "Balance amount must be a number"
+      });
+    }
+
+    const currency = String(req.body.currency || card.currency || "USD").toUpperCase();
+    const now = new Date().toISOString();
+    const statePatch = {
+      provider,
+      balance: `${balanceAmount} ${currency}`,
+      balanceAmount,
+      balanceStatus: "recorded",
+      lastAction: "balance",
+      lastResult: {
+        status: "recorded",
+        balanceAmount,
+        currency,
+        responseMessage: "Balance value recorded"
+      },
+      updatedAt: now
+    };
+
+    await mongo.collection("checkedLiveCards").updateOne({ id: card.id }, { $set: statePatch });
+    await writeAuditLog({
+      entityType: "checked_live_card",
+      entityId: card.id,
+      action: "checked_live_card_balance_recorded",
+      status: "recorded",
+      actorUserId: req.user?.id || null,
+      details: {
+        checkedCardPatch: statePatch,
+        maskedPan: card.maskedPan
+      }
+    });
+
+    return res.status(201).json({
+      status: "recorded",
+      balanceAmount,
+      currency,
+      responseMessage: "Balance value recorded",
+      checkedCard: {
+        id: card.id,
+        provider,
+        operation,
+        state: statePatch
+      }
+    });
+  }
+
   const providerCard = {
     ...card,
     providerReferenceId: req.body.transactionId || req.body.retref || card.providerReferenceId,

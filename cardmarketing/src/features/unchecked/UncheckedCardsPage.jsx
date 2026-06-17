@@ -146,7 +146,7 @@ function ProviderPrompt({ prompt, setPrompt, onSubmit }) {
           </select>
         </label>
         <label>
-          Amount
+          {prompt.kind === 'balance' ? 'Balance value' : 'Amount'}
           <input value={prompt.amount} onChange={(event) => setPrompt((current) => ({ ...current, amount: event.target.value }))} />
         </label>
         <label>
@@ -164,6 +164,42 @@ function ProviderPrompt({ prompt, setPrompt, onSubmit }) {
 
 function stripQuotes(value) {
   return String(value || '').trim().replace(/^['"]|['"]$/g, '').trim()
+}
+
+function splitSqlTupleFields(line) {
+  const body = String(line || '').trim().replace(/^\(/, '').replace(/\),?$/, '')
+  const fields = []
+  let current = ''
+  let quote = ''
+
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]
+    const next = body[index + 1]
+    if (quote) {
+      if (char === quote && next === quote) {
+        current += char
+        index += 1
+      } else if (char === quote) {
+        quote = ''
+      } else {
+        current += char
+      }
+      continue
+    }
+
+    if (char === '\'' || char === '"') {
+      quote = char
+      continue
+    }
+    if (char === ',') {
+      fields.push(stripQuotes(current))
+      current = ''
+      continue
+    }
+    current += char
+  }
+  fields.push(stripQuotes(current))
+  return fields.map((field) => field.trim())
 }
 
 function jsonField(block, keys) {
@@ -188,9 +224,17 @@ function objectToCardLine(source = {}) {
 }
 
 function parseTupleLine(line) {
-  const values = [...line.matchAll(/'([^']*)'|"([^"]*)"/g)].map((match) => stripQuotes(match[1] || match[2]))
-  if (values.length < 3) return null
-  const [number, cvv, exp, name = '', level = ''] = values
+  const values = splitSqlTupleFields(line)
+  if (values.length >= 6 && /^\d+$/.test(values[0]) && /^\d{12,19}$/.test(values[1])) {
+    const [, number, name = '', month = '', year = '', cvv = '', , , , , phone = '', , , bank = '', level = ''] = values
+    if (!number || !month || !year || !cvv) return null
+    const note = [bank, level, phone ? `phone:${phone}` : ''].filter(Boolean).join(' / ')
+    return `${number}|${month}|${year}|${cvv}|00000|${name}|${note}`
+  }
+
+  const quotedValues = [...String(line || '').matchAll(/'([^']*)'|"([^"]*)"/g)].map((match) => stripQuotes(match[1] || match[2]))
+  if (quotedValues.length < 3) return null
+  const [number, cvv, exp, name = '', level = ''] = quotedValues
   if (!number || !cvv || !exp) return null
   return `${number}|${exp}|${cvv}|00000|${name}|${level}`
 }
@@ -355,9 +399,13 @@ export function UncheckedCardsPage({ user, runAction }) {
   const [requestLogs, setRequestLogs] = useState([])
   const [cardsText, setCardsText] = useState('')
   const [range, setRange] = useState({ start: '1', end: '10', delayMs: '750' })
+  const [selectedUncheckedIds, setSelectedUncheckedIds] = useState([])
   const withLoader = runAction || ((task) => task())
   const canCreateCards = Boolean(user?.permissions?.canCreateCards)
   const canRunAuthCheck = Boolean(user?.permissions?.canRunAuthCheck)
+  const selectableUncheckedRows = unchecked.rows.filter((card) => canRunAuthCheck && !card.checked)
+  const selectedUncheckedSet = useMemo(() => new Set(selectedUncheckedIds), [selectedUncheckedIds])
+  const allVisibleUncheckedSelected = selectableUncheckedRows.length > 0 && selectableUncheckedRows.every((card) => selectedUncheckedSet.has(card.id))
 
   function pushRequestLog({ action, request, response, ok = true, status = 'ok' }) {
     setRequestLogs((current) => [{
@@ -415,14 +463,38 @@ export function UncheckedCardsPage({ user, runAction }) {
     })
   }
 
+  function toggleUncheckedSelection(cardId, checked) {
+    setSelectedUncheckedIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(cardId)
+      else next.delete(cardId)
+      return [...next]
+    })
+  }
+
+  function toggleVisibleUncheckedSelection(checked) {
+    setSelectedUncheckedIds((current) => {
+      const next = new Set(current)
+      for (const card of selectableUncheckedRows) {
+        if (checked) next.add(card.id)
+        else next.delete(card.id)
+      }
+      return [...next]
+    })
+  }
+
   async function submitPrompt(nextPrompt) {
     await withLoader(async () => {
       try {
-        const amount = Math.max(1, Math.round(Number(nextPrompt.amount || 0.01) * 100))
+        const rawAmount = Number(nextPrompt.amount || 0)
+        const amount = nextPrompt.kind === 'balance'
+          ? rawAmount
+          : Math.max(1, Math.round(Number(nextPrompt.amount || 0.01) * 100))
         const body = {
           provider: nextPrompt.provider,
           operation: nextPrompt.kind === 'unchecked-live' ? 'live' : nextPrompt.kind,
           amount,
+          balanceAmount: nextPrompt.kind === 'balance' ? rawAmount : undefined,
           currency: 'usd',
           transactionId: nextPrompt.transactionId || undefined,
           retref: nextPrompt.transactionId || undefined,
@@ -585,6 +657,46 @@ export function UncheckedCardsPage({ user, runAction }) {
     }, { label: 'CheckCard çalışıyor', variant: 'transaction', detail: 'Kartlar sırayla liveCheck ve binCheck servislerinden geçiriliyor' })
   }
 
+  async function checkSelectedCards() {
+    const ids = selectedUncheckedIds
+    if (!ids.length) return
+
+    await withLoader(async () => {
+      try {
+        const body = {
+          ids,
+          delayMs: range.delayMs,
+          provider: 'clover',
+          liveMode: 'verification',
+        }
+        const payload = await api('/unchecked-cards/live-check-selected', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        })
+        pushRequestLog({
+          action: 'Selected Live Check',
+          request: { endpoint: '/api/unchecked-cards/live-check-selected', body },
+          response: payload,
+          ok: true,
+          status: payload.status || 'completed',
+        })
+        setResult({ title: 'Selected Live Check Result', payload })
+        setSelectedUncheckedIds([])
+        await reloadAll()
+      } catch (error) {
+        const payload = error.data || { message: error.message, status: error.status }
+        pushRequestLog({
+          action: 'Selected Live Check Failed',
+          request: { endpoint: '/api/unchecked-cards/live-check-selected', ids },
+          response: payload,
+          ok: false,
+          status: error.status || 'failed',
+        })
+        setResult({ title: 'Selected Live Check Failed', payload })
+      }
+    }, { label: 'Seçili kartlar check ediliyor', variant: 'transaction', detail: `${ids.length} kart liveCheck ve binCheck servislerinden geçiriliyor` })
+  }
+
   return (
     <div className="unchecked-page-grid">
       <div className="page-stack">
@@ -601,6 +713,9 @@ export function UncheckedCardsPage({ user, runAction }) {
         </div>
         {canRunAuthCheck && <div className="unchecked-checkbar">
           <button type="button" onClick={checkRange}>CheckCard</button>
+          <button type="button" className="ghost" onClick={checkSelectedCards} disabled={!selectedUncheckedIds.length}>
+            Seçili Live Check{selectedUncheckedIds.length ? ` (${selectedUncheckedIds.length})` : ''}
+          </button>
           <label>
             Başlangıç
             <input type="number" min="1" value={range.start} onChange={(event) => setRange((current) => ({ ...current, start: event.target.value }))} />
@@ -618,6 +733,15 @@ export function UncheckedCardsPage({ user, runAction }) {
           <table>
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="Sayfadaki kartları seç"
+                    checked={allVisibleUncheckedSelected}
+                    disabled={!selectableUncheckedRows.length}
+                    onChange={(event) => toggleVisibleUncheckedSelection(event.target.checked)}
+                  />
+                </th>
                 <th>Country</th>
                 <th>Bank</th>
                 <th>Level</th>
@@ -636,7 +760,19 @@ export function UncheckedCardsPage({ user, runAction }) {
             <tbody>
               {unchecked.rows.map((card) => (
                 <tr key={card.id}>
-                                    <td>{card.countryCode || '-'}</td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`${card.maskedPan} seç`}
+                      checked={selectedUncheckedSet.has(card.id)}
+                      disabled={!canRunAuthCheck || card.checked}
+                      onChange={(event) => toggleUncheckedSelection(card.id, event.target.checked)}
+                    />
+                  </td>
+                  <td>{card.countryCode || '-'}</td>
+                  <td title={card.bank || ''}>{truncateText(card.bank, 24)}</td>
+                  <td>{card.cardLevel || '-'}</td>
+                  <td>{card.cardType || '-'}</td>
                   <td>{card.maskedPan}</td>
                   <td>{card.exp}</td>
                   <td>{card.cvv}</td>
@@ -656,8 +792,8 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="15" className="muted">{uncheckedError}</td></tr>}
-              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="15" className="muted">Kayıt yok</td></tr>}
+              {uncheckedError && <tr><td colSpan="14" className="muted">{uncheckedError}</td></tr>}
+              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="14" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>
