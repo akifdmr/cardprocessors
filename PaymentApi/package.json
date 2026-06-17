@@ -8,6 +8,7 @@
     "build:all": "npm run build && node scripts/check-mongodb-config.js",
     "check": "npm run build",
     "db:migrate": "node scripts/migrate-mongodb.js",
+    "valid:import": "node scripts/import-valid-card-lists-safe.js",
     "dev": "cross-env NODE_ENV=development MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true npm run db:migrate && cross-env NODE_ENV=development MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true node src/server.js",
     "dev:local": "cross-env NODE_ENV=local MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true npm run db:migrate && cross-env NODE_ENV=local MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true node src/server.js",
     "dev:development": "npm run dev",
@@ -59,13 +60,17 @@
     "up:prod": "Alias for start:all."
   },
   "dependencies": {
+    "@amazonpay/amazon-pay-api-sdk-nodejs": "^2.3.4",
     "axios": "^1.9.0",
     "braintree": "^3.37.0",
     "cross-env": "^7.0.3",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "mongodb": "^7.2.0",
+    "puppeteer": "^25.1.0",
+    "selenium": "^2.20.0",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "webdriver-manager": "^12.1.9"
   }
 }

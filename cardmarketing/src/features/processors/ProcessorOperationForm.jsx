@@ -26,6 +26,19 @@ const fieldLabels = {
   currency: 'Currency',
   customerVaultId: 'Customer Vault ID',
   providerPaymentToken: 'Provider Token',
+  chargePermissionId: 'Charge Permission ID',
+  checkoutReviewReturnUrl: 'Review Return URL',
+  checkoutResultReturnUrl: 'Result Return URL',
+  checkoutSessionId: 'Checkout Session ID',
+  scopes: 'Scopes',
+  deliverySpecifications: 'Delivery Specifications JSON',
+  storeName: 'Store Name',
+  noteToBuyer: 'Note To Buyer',
+  customInformation: 'Custom Information',
+  softDescriptor: 'Soft Descriptor',
+  reason: 'Reason',
+  closureReason: 'Closure Reason',
+  cancelPendingCharges: 'Cancel Pending Charges',
   email: 'Email',
   phone: 'Phone',
   transactionReferenceId: 'Transaction Reference',
@@ -62,6 +75,7 @@ function normalizedProvider(providerKey) {
   if (key === 'global-payments' || key === 'portico') return 'globalpayments'
   if (key === 'networkmerchants' || key === 'network-merchants') return 'nmi'
   if (key === 'zohopayments' || key === 'zoho-payments' || key === 'zoho_payment') return 'zoho'
+  if (key === 'amazon' || key === 'amazon-pay' || key === 'amazon_pay' || key === 'amazonpayments') return 'amazonpay'
   if (key === 'quikliepay' || key === 'quiklie-payment' || key === 'quicklie' || key === 'quickliepay' || key === 'quicklie-payment') return 'quiklie'
   return key
 }
@@ -106,6 +120,18 @@ function GenericField({ field, value, required, onChange }) {
     )
   }
 
+  if (field === 'cancelPendingCharges') {
+    return (
+      <label>
+        <span>{labelFor(field)}</span>
+        <select value={value.cancelPendingCharges || 'false'} onChange={(event) => onChange({ cancelPendingCharges: event.target.value })}>
+          <option value="false">no</option>
+          <option value="true">yes</option>
+        </select>
+      </label>
+    )
+  }
+
   if (field === 'achEntryCode') {
     return (
       <label>
@@ -120,7 +146,7 @@ function GenericField({ field, value, required, onChange }) {
   }
 
   return (
-    <label className={['retref', 'transactionId', 'authorizationPnref', 'accountNumber', 'note', 'description', 'token', 'source', 'transactionReferenceId', 'customerReferenceId'].includes(field) ? 'full' : ''}>
+    <label className={['retref', 'transactionId', 'authorizationPnref', 'accountNumber', 'note', 'description', 'token', 'source', 'transactionReferenceId', 'customerReferenceId', 'chargePermissionId', 'checkoutReviewReturnUrl', 'checkoutResultReturnUrl', 'checkoutSessionId', 'deliverySpecifications', 'customInformation'].includes(field) ? 'full' : ''}>
       <span>{labelFor(field)}</span>
       <input
         required={required}
@@ -179,6 +205,11 @@ export function ProcessorOperationForm({ open, providerKey, methodKey, catalog, 
 
   const compatibleCards = cardsForProvider(cards, provider.key)
   const profile = formProfileFor(provider.key, method, fields)
+  const normalizedProviderKey = normalizedProvider(provider.key)
+  const normalizedOperation = String(method.operation || method.key || '').toLowerCase()
+  if (normalizedProviderKey === 'amazonpay' && ['auth', 'authorize', 'sale', 'charge', 'verification', 'verify', 'live'].includes(normalizedOperation)) {
+    required.delete('chargePermissionId')
+  }
   const hasCard = fields.some((item) => cardFields.has(item))
   const genericFields = fields.filter((field) => {
     if (cardFields.has(field)) return false

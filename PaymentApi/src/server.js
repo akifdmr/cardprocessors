@@ -14,6 +14,7 @@ const fluidpayService = require("./services/fluidpayService");
 const braintreeService = require("./services/braintreeService");
 const nmiService = require("./services/nmiService");
 const zohoPaymentsService = require("./services/zohoPaymentsService");
+const amazonPayService = require("./services/amazonPayService");
 const globalPaymentsService = require("./services/globalPaymentsService");
 const propelrPayService = require("./services/propelrPayService");
 const quikliePaymentService = require("./services/quikliePaymentService");
@@ -23,6 +24,8 @@ const twilioVoiceService = require("./services/twilioVoiceService");
 const numberService = require("./services/numberService");
 const unchargebackService = require("./services/unchargebackService");
 const burpSuiteService = require("./services/burpSuiteService");
+const liveCheckerService = require("./services/liveCheckerService");
+const cardCheckService = require("./services/cardCheckService");
 const { getProviderMessage, isAxiosError, toSafeErrorLog } = require("./utils/errorUtils");
 const maskRoutes = require("./routers/maskRoutes");
 const numberRoutes = require("./routers/numberRoutes");
@@ -114,7 +117,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "providerPaymentToken", "last4", "expMonth", "expYear"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
           providerPaymentToken: { type: "string" },
           last4: { type: "string" },
           expMonth: { type: "string" },
@@ -169,7 +172,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "verificationStatus"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
           verificationStatus: { type: "string", enum: ["pending", "verified", "declined", "review"] },
           providerReferenceId: { type: "string" },
           avsResult: { type: "string" },
@@ -1649,6 +1652,7 @@ function getProviderReportCatalog() {
   const braintreeStatus = braintreeService.getStatus();
   const nmiStatus = nmiService.getStatus();
   const zohoStatus = zohoPaymentsService.getStatus();
+  const amazonPayStatus = amazonPayService.getStatus();
   const globalPaymentsStatus = globalPaymentsService.getStatus();
   const propelrPayStatus = propelrPayService.getStatus();
   const quiklieStatus = quikliePaymentService.getStatus();
@@ -1710,6 +1714,19 @@ function getProviderReportCatalog() {
         `NVP base URL: ${paypalNvp.baseUrl || "-"}`
       ],
       capabilities: ["rest_oauth", "manager_status", "manager_inquiry", "live_check", "nvp_test", "sale", "auth", "capture", "void"]
+    },
+    {
+      key: "amazonpay",
+      group: "payment_gateways",
+      label: "Amazon Pay",
+      configured: amazonPayStatus.configured,
+      missing: amazonPayStatus.missing,
+      configNotes: [
+        "Amazon Pay Checkout v2 uses signed requests with public key id and private key; client secret alone is not enough for API calls",
+        `Default auth check amount: ${amazonPayStatus.authAmount || "0.20"} ${amazonPayStatus.ledgerCurrency || "USD"}`,
+        "Auth requires a buyer-approved chargePermissionId from Amazon Pay checkout"
+      ],
+      capabilities: ["status", "test", "checkout_session", "complete_checkout_session", "charge_permission_detail", "auth", "sale", "capture", "void", "refund", "transaction_detail"]
     },
     {
       key: "fluidpay",
@@ -1925,6 +1942,11 @@ function isProcessorResultHealthy(result) {
   return ["ok", "success", "healthy", "approved", "completed"].includes(status);
 }
 
+function isProcessorResultConfiguredOnly(result) {
+  const status = String(result?.status || result?.accountStatus || result?.resultCode || "").toLowerCase();
+  return result?.configured === true && ["configured", "signing_ready", "ready"].includes(status);
+}
+
 function summarizeProcessorHealthResult(result) {
   return redactSensitiveReportData({
     ok: result?.ok,
@@ -1994,6 +2016,7 @@ function getPaymentProcessorHealthChecks() {
   return [
     { key: "clover", check: () => cloverService.testConnection() },
     { key: "paypal", ignoreCatalogConfigured: true, check: () => runPayPalProcessorHealthCheck() },
+    { key: "amazonpay", check: () => amazonPayService.testConnection() },
     { key: "fluidpay", check: () => fluidpayService.testConnection() },
     { key: "braintree", check: () => braintreeService.testConnection() },
     { key: "nmi", check: () => nmiService.testConnection() },
@@ -2047,14 +2070,15 @@ async function runPaymentProcessorHealthChecks(reason = "startup") {
     try {
       const result = await descriptor.check();
       const healthy = isProcessorResultHealthy(result);
+      const configuredOnly = !healthy && isProcessorResultConfiguredOnly(result);
       paymentProcessorHealth.processors[descriptor.key] = {
         key: descriptor.key,
         label: catalogItem.label,
-        status: healthy ? "healthy" : "unhealthy",
-        healthy,
+        status: healthy ? "healthy" : configuredOnly ? "configured" : "unhealthy",
+        healthy: healthy ? true : configuredOnly ? null : false,
         configured: result?.configured !== false,
         checkedAt: new Date().toISOString(),
-        message: result?.responseMessage || result?.message || (healthy ? "healthy" : "health check failed"),
+        message: result?.responseMessage || result?.message || (healthy ? "healthy" : configuredOnly ? "configured" : "health check failed"),
         result: summarizeProcessorHealthResult(result),
         reason
       };
@@ -2484,6 +2508,7 @@ function classifyAttemptProvider(attempt) {
   if (attempt.provider === "globalpayments") return "globalpayments";
   if (attempt.provider === "propelrpay") return "propelrpay";
   if (attempt.provider === "quiklie") return "quiklie";
+  if (attempt.provider === "amazonpay") return "amazonpay";
   if (attempt.provider === "paypal") return "paypal";
   return attempt.provider || "unknown";
 }
@@ -2499,6 +2524,7 @@ function classifyAuditProvider(log) {
   if (action.startsWith("globalpayments_") || entityId.startsWith("globalpayments")) return "globalpayments";
   if (action.startsWith("propelrpay_") || entityId.startsWith("propelrpay")) return "propelrpay";
   if (action.startsWith("quiklie_") || entityId.startsWith("quiklie")) return "quiklie";
+  if (action.startsWith("amazonpay_") || entityId.startsWith("amazonpay")) return "amazonpay";
   if (action.startsWith("paypal_") || entityId.startsWith("paypal")) return "paypal";
   if (action.startsWith("twilio_") || entityId.startsWith("twilio")) return "twilio_voice";
   if (action.startsWith("telnyx_") || entityId.startsWith("telnyx")) return "telnyx_voice";
@@ -2684,6 +2710,14 @@ function getCardProviderConfigStatus(provider) {
       message: "Zoho Payments configuration is incomplete"
     };
   }
+  if (provider === "amazonpay") {
+    const status = amazonPayService.getStatus();
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: "Amazon Pay configuration is incomplete"
+    };
+  }
   if (provider === "globalpayments") {
     const status = globalPaymentsService.getStatus();
     return {
@@ -2838,6 +2872,110 @@ const providerOperationCatalog = {
       }
     ]
   },
+  amazonpay: {
+    key: "amazonpay",
+    provider: "amazonpay",
+    label: "Amazon Pay",
+    description: "Amazon Pay Checkout v2 operations. Auth checks require a buyer-approved chargePermissionId; direct PAN auth is not supported by Amazon Pay.",
+    methods: [
+      {
+        key: "checkout_session",
+        label: "Create Checkout Session",
+        operation: "checkout_session",
+        fields: ["amount", "currency", "reference", "checkoutReviewReturnUrl", "checkoutResultReturnUrl", "scopes", "deliverySpecifications"],
+        required: ["checkoutReviewReturnUrl", "checkoutResultReturnUrl"],
+        features: ["Creates an Amazon Pay CheckoutSession", "Default amount is 0.20 USD", "scopes can be comma-separated or JSON array", "deliverySpecifications must be JSON", "Buyer approval returns a chargePermissionId for auth"]
+      },
+      {
+        key: "complete_checkout_session",
+        label: "Complete Checkout Session",
+        operation: "complete_checkout_session",
+        fields: ["checkoutSessionId", "amount", "currency"],
+        required: ["checkoutSessionId", "amount"],
+        features: ["POST /checkoutSessions/{checkoutSessionId}/complete", "Completes buyer-approved checkout session", "Amount is decimal currency value"]
+      },
+      {
+        key: "verification",
+        label: "Card Verification",
+        operation: "verification",
+        fields: ["chargePermissionId", "amount", "currency", "reference", "checkoutReviewReturnUrl", "checkoutResultReturnUrl"],
+        required: ["chargePermissionId"],
+        features: ["Reads buyer-approved charge permission status", "No charge is created", "If Charge Permission ID is empty, UI starts Amazon checkout approval first"]
+      },
+      {
+        key: "auth",
+        label: "Auth Check $0.20",
+        operation: "auth",
+        fields: ["chargePermissionId", "amount", "currency", "reference", "checkoutReviewReturnUrl", "checkoutResultReturnUrl"],
+        required: ["chargePermissionId"],
+        features: ["Creates an Amazon Pay Charge with captureNow=false", "Default auth amount is 0.20 USD", "Capture or void later by chargeId"]
+      },
+      {
+        key: "sale",
+        label: "Sale / Capture Now",
+        operation: "sale",
+        fields: ["chargePermissionId", "amount", "currency", "reference", "checkoutReviewReturnUrl", "checkoutResultReturnUrl"],
+        required: ["chargePermissionId"],
+        features: ["Creates an Amazon Pay Charge with captureNow=true", "Default sale amount is 0.20 USD", "Requires buyer-approved chargePermissionId"]
+      },
+      {
+        key: "charge_permission_detail",
+        label: "Charge Permission Status",
+        operation: "charge_permission_detail",
+        fields: ["chargePermissionId"],
+        required: ["chargePermissionId"],
+        features: ["Reads buyer-approved charge permission status", "Use before auth or sale when checking Amazon Pay approval state"]
+      },
+      {
+        key: "update_charge_permission",
+        label: "Update Charge Permission",
+        operation: "update_charge_permission",
+        fields: ["chargePermissionId", "reference", "storeName", "noteToBuyer", "customInformation"],
+        required: ["chargePermissionId"],
+        features: ["PATCH /chargePermissions/{chargePermissionId}", "Updates merchant metadata on a buyer-approved charge permission"]
+      },
+      {
+        key: "close_charge_permission",
+        label: "Close Charge Permission",
+        operation: "close_charge_permission",
+        fields: ["chargePermissionId", "closureReason", "cancelPendingCharges"],
+        required: ["chargePermissionId"],
+        features: ["DELETE /chargePermissions/{chargePermissionId}/close", "Closes the permission so no more charges are created", "cancelPendingCharges can be true or false"]
+      },
+      {
+        key: "capture",
+        label: "Capture",
+        operation: "capture",
+        fields: ["transactionId", "amount", "currency"],
+        required: ["transactionId"],
+        features: ["Captures a previous Amazon Pay charge authorization", "Uses chargeId as transactionId"]
+      },
+      {
+        key: "void",
+        label: "Void",
+        operation: "void",
+        fields: ["transactionId", "note"],
+        required: ["transactionId"],
+        features: ["Cancels an authorized Amazon Pay charge before capture"]
+      },
+      {
+        key: "refund",
+        label: "Refund",
+        operation: "refund",
+        fields: ["transactionId", "amount", "currency"],
+        required: ["transactionId", "amount"],
+        features: ["Refunds a captured Amazon Pay charge"]
+      },
+      {
+        key: "transaction_detail",
+        label: "Transaction Detail",
+        operation: "transaction_detail",
+        fields: ["transactionId"],
+        required: ["transactionId"],
+        features: ["Reads Amazon Pay charge status by chargeId"]
+      }
+    ]
+  },
   fluidpay: {
     key: "fluidpay",
     provider: "fluidpay",
@@ -2970,6 +3108,7 @@ function normalizeProviderKey(provider) {
   if (key === "quikliepay" || key === "quiklie-payment" || key === "quicklie" || key === "quickliepay" || key === "quicklie-payment") return "quiklie";
   if (key === "networkmerchants" || key === "network-merchants") return "nmi";
   if (key === "zohopayments" || key === "zoho-payments" || key === "zoho_payment") return "zoho";
+  if (key === "amazon" || key === "amazon-pay" || key === "amazon_pay" || key === "amazonpayments") return "amazonpay";
   return key;
 }
 
@@ -4120,7 +4259,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
   provider = normalizeProviderKey(provider);
   operation = String(operation || "").toLowerCase();
   try {
-  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "quiklie", "paypal", "braintree", "nmi", "zoho"].includes(provider)) {
+  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "quiklie", "paypal", "amazonpay", "braintree", "nmi", "zoho"].includes(provider)) {
     const response = buildOperationResponseModel({
       operationId,
       provider: provider || req.body.provider || null,
@@ -4129,7 +4268,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
       result: {
         status: "failed",
         resultCode: "INVALID_PROVIDER",
-        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, quiklie, paypal, braintree, nmi or zoho"
+        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, quiklie, paypal, amazonpay, braintree, nmi or zoho"
       },
       request: req.body,
       logs: { audit: false, providerAttempt: false },
@@ -4137,7 +4276,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
     });
     return res.status(400).json(response);
   }
-  if (!["sale", "charge", "authorize", "auth", "ach", "ach_sale", "echeck", "verification", "verify", "live", "balance", "capture", "refund", "void", "reversal"].includes(operation)) {
+  if (!["sale", "charge", "authorize", "auth", "ach", "ach_sale", "echeck", "verification", "verify", "live", "balance", "capture", "refund", "void", "reversal", "checkout_session", "complete_checkout_session", "charge_permission_detail", "update_charge_permission", "close_charge_permission", "transaction_detail"].includes(operation)) {
     const response = buildOperationResponseModel({
       operationId,
       provider,
@@ -4210,7 +4349,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
 
   const requestedCardId = getSavedCardId(req.body.cardId);
   const retrefLookup = req.body.retref || req.body.initialRetref || req.body.initialTransactionId || req.body.originalTransactionId;
-  const isTransactionOnly = ["capture", "refund", "void", "reversal"].includes(operation);
+  const isTransactionOnly = ["capture", "refund", "void", "reversal", "checkout_session", "complete_checkout_session", "charge_permission_detail", "update_charge_permission", "close_charge_permission", "transaction_detail"].includes(operation);
   let savedCard = requestedCardId ? await getCardRecord(requestedCardId) : null;
   if (!isTransactionOnly && !savedCard && retrefLookup && !req.body.pan && !req.body.account && !req.body.token && !req.body.source && !req.body.providerPaymentToken) {
     savedCard = await getCardRecordByProviderReferenceId(provider, retrefLookup);
@@ -4305,6 +4444,20 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
     if (operation === "capture") resultPromise = zohoPaymentsService.captureTransaction(payload);
     if (operation === "refund") resultPromise = zohoPaymentsService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = zohoPaymentsService.voidTransaction(payload);
+  }
+  if (provider === "amazonpay") {
+    if (operation === "checkout_session") resultPromise = amazonPayService.createCheckoutSession(payload);
+    if (operation === "complete_checkout_session") resultPromise = amazonPayService.completeCheckoutSession(payload);
+    if (operation === "sale" || operation === "charge") resultPromise = amazonPayService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = amazonPayService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = amazonPayService.verifyCard(payload);
+    if (operation === "capture") resultPromise = amazonPayService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = amazonPayService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = amazonPayService.voidTransaction(payload);
+    if (operation === "transaction_detail") resultPromise = amazonPayService.getTransaction(payload.transactionId || payload.retref);
+    if (operation === "charge_permission_detail") resultPromise = amazonPayService.getChargePermission(payload);
+    if (operation === "update_charge_permission") resultPromise = amazonPayService.updateChargePermission(payload);
+    if (operation === "close_charge_permission") resultPromise = amazonPayService.closeChargePermission(payload);
   }
   if (provider === "globalpayments") {
     if (operation === "sale" || operation === "charge") resultPromise = globalPaymentsService.saleCard(payload);
@@ -4849,6 +5002,96 @@ app.get("/api/providers/zoho/transactions/:transactionId", requireAuth, requireP
   res.json(result);
 }));
 
+function amazonPayCardRoute(operation) {
+  return asyncHandler(async (req, res) => {
+    await runProviderCardOperation(req, res, {
+      provider: "amazonpay",
+      operation
+    });
+  });
+}
+
+app.get("/api/providers/amazonpay/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json({
+    checkoutV2: amazonPayService.getStatus(),
+    legacyWidget: amazonPayService.getLegacyWidgetStatus()
+  });
+}));
+
+app.get("/api/providers/amazonpay/legacy-widget-config", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  res.json(amazonPayService.getLegacyWidgetConfig({
+    amount: req.query.amount,
+    currency: req.query.currency,
+    returnUrl: req.query.returnUrl,
+    cancelReturnUrl: req.query.cancelReturnUrl,
+    note: req.query.note,
+    paymentAction: req.query.paymentAction,
+    signature: req.query.signature
+  }));
+}));
+
+app.post("/api/providers/amazonpay/test", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await amazonPayService.testConnection(req.body || {});
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "amazonpay",
+    action: "amazonpay_connection_test",
+    status: result.ok ? "success" : result.status || "failed",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.status(result.ok === false ? 400 : 200).json(result);
+}));
+
+app.post("/api/providers/amazonpay/checkout-sessions", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("checkout_session"));
+app.post("/api/providers/amazonpay/checkout-sessions/:checkoutSessionId/complete", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  req.body = {
+    ...req.body,
+    checkoutSessionId: req.body.checkoutSessionId || req.params.checkoutSessionId
+  };
+  await runProviderCardOperation(req, res, {
+    provider: "amazonpay",
+    operation: "complete_checkout_session",
+    actionOverride: "amazonpay_complete_checkout_session"
+  });
+}));
+app.post("/api/providers/amazonpay/cards/auth", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("authorize"));
+app.post("/api/providers/amazonpay/cards/sale", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("sale"));
+app.post("/api/providers/amazonpay/cards/verify", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("verification"));
+app.post("/api/providers/amazonpay/cards/capture", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("capture"));
+app.post("/api/providers/amazonpay/cards/refund", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("refund"));
+app.post("/api/providers/amazonpay/cards/void", requireAuth, requirePermission("canRunAuthCheck"), amazonPayCardRoute("void"));
+app.get("/api/providers/amazonpay/charge-permissions/:chargePermissionId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await amazonPayService.getChargePermission(req.params.chargePermissionId);
+  res.json(result);
+}));
+app.patch("/api/providers/amazonpay/charge-permissions/:chargePermissionId", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  req.body = {
+    ...req.body,
+    chargePermissionId: req.body.chargePermissionId || req.params.chargePermissionId
+  };
+  await runProviderCardOperation(req, res, {
+    provider: "amazonpay",
+    operation: "update_charge_permission",
+    actionOverride: "amazonpay_update_charge_permission"
+  });
+}));
+app.delete("/api/providers/amazonpay/charge-permissions/:chargePermissionId/close", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  req.body = {
+    ...req.body,
+    chargePermissionId: req.body.chargePermissionId || req.params.chargePermissionId
+  };
+  await runProviderCardOperation(req, res, {
+    provider: "amazonpay",
+    operation: "close_charge_permission",
+    actionOverride: "amazonpay_close_charge_permission"
+  });
+}));
+app.get("/api/providers/amazonpay/transactions/:transactionId", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const result = await amazonPayService.getTransaction(req.params.transactionId);
+  res.json(result);
+}));
+
 function quiklieCardRoute(operation) {
   return asyncHandler(async (req, res) => {
     await runProviderCardOperation(req, res, {
@@ -5128,6 +5371,1127 @@ app.get(["/api/providers/propelrpay/transactions/:transactionId", "/api/provider
   }
 }));
 
+function paginationFromQuery(queryParams = {}) {
+  const pageSize = Math.min(100, Math.max(1, Number(queryParams.pageSize || 25)));
+  const page = Math.max(1, Number(queryParams.page || 1));
+  return {
+    page,
+    pageSize,
+    skip: (page - 1) * pageSize
+  };
+}
+
+function normalizeUncheckedCardLinePayload(payload = {}) {
+  if (payload.line) {
+    return cardCheckService.parseCardLine(payload.line);
+  }
+  return cardCheckService.normalizeCardInput(payload);
+}
+
+function uncheckedCardPublicFields(card = {}) {
+  return {
+    id: card.id,
+    sourceLineNumber: card.sourceLineNumber,
+    correlationId: card.correlationId,
+    recordHash: card.recordHash,
+    maskedPan: card.maskedPan,
+    bin: card.bin,
+    last4: card.last4,
+    exp: card.exp,
+    expMonth: card.expMonth,
+    expYear: card.expYear,
+    zip: card.zip || null,
+    holderName: card.holderName ?? "",
+    address: card.address ?? "",
+    phone: card.phone || null,
+    countryCode: card.countryCode || null,
+    bank: card.bank || null,
+    cardType: card.cardType || null,
+    cardLevel: card.cardLevel || null,
+    binCheckProvider: card.binCheckProvider || null,
+    binCheckStatus: card.binCheckStatus || null,
+    binCheckError: card.binCheckError || null,
+    checked: Boolean(card.checked),
+    live: Boolean(card.live),
+    balance: card.balance || null,
+    provider: card.provider || null,
+    providerReferenceId: card.providerReferenceId || null,
+    lastCheck: card.lastCheck || null,
+    createdAt: card.createdAt || null,
+    updatedAt: card.updatedAt || null
+  };
+}
+
+function uncheckedCardCheckPayload(card = {}, body = {}) {
+  return {
+    provider: body.provider || card.provider || "clover",
+    pan: decrypt(card.panEncrypted),
+    expMonth: card.expMonth,
+    expYear: card.expYear,
+    exp: card.exp,
+    cvv: decrypt(card.cvvEncrypted),
+    zip: card.zip || "00000",
+    holderName: card.holderName || "",
+    address: card.address || "",
+    phone: card.phone || "",
+    amount: Number(body.amount || 1),
+    currency: body.currency || "usd",
+    liveMode: body.liveMode || "verification"
+  };
+}
+
+function checkedStateFromServiceResult(result = {}) {
+  return liveCheckerService.isLiveResponse(result.live || result);
+}
+
+function binPatchFromResult(binCheck = {}) {
+  const summary = binCheck.summary || {};
+  const details = binCheck.details || {};
+  return {
+    countryCode: summary.countryCode || details["ISO Country Code A2"] || details["ISO Country Code A3"] || null,
+    bank: summary.issuer || details["Issuer Name / Bank"] || details.Issuer || null,
+    cardType: summary.type || details["Card Type"] || null,
+    cardLevel: summary.level || details["Card Level"] || null,
+    binCheckProvider: binCheck.source || "paypal",
+    binCheckStatus: binCheck.status || null,
+    binCheckError: binCheck.error || binCheck.fallbackError || null
+  };
+}
+
+function formatVerifiedBinLabel(binCheck = {}) {
+  return formatBinCheckLine(binCheck) || [
+    checkedCardCountry(binCheck),
+    checkedCardBank(binCheck),
+    checkedCardType(binCheck),
+    checkedCardSegment(binCheck)
+  ].filter(Boolean).join(" / ") || null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function maskOnlyProjection() {
+  return {
+    _id: 0,
+    id: 1,
+    sourceLineNumber: 1,
+    correlationId: 1,
+    recordHash: 1,
+    maskedPan: 1,
+    bin: 1,
+    last4: 1,
+    exp: 1,
+    expMonth: 1,
+    expYear: 1,
+    zip: 1,
+    holderName: 1,
+    address: 1,
+    phone: 1,
+    countryCode: 1,
+    bank: 1,
+    cardType: 1,
+    cardLevel: 1,
+    binCheckProvider: 1,
+    binCheckStatus: 1,
+    binCheckError: 1,
+    checked: 1,
+    live: 1,
+    balance: 1,
+    provider: 1,
+    providerReferenceId: 1,
+    lastCheck: 1,
+    createdAt: 1,
+    updatedAt: 1
+  };
+}
+
+function checkedLiveProjection() {
+  return {
+    _id: 0,
+    id: 1,
+    uncheckedCardId: 1,
+    maskedPan: 1,
+    bin: 1,
+    last4: 1,
+    exp: 1,
+    holderName: 1,
+    countryCode: 1,
+    bank: 1,
+    cardType: 1,
+    cardLevel: 1,
+    provider: 1,
+    providerReferenceId: 1,
+    live: 1,
+    capture: 1,
+    auth: 1,
+    balance: 1,
+    lastAction: 1,
+    lastResult: 1,
+    createdAt: 1,
+    updatedAt: 1
+  };
+}
+
+function checkedCardsProjection() {
+  return {
+    _id: 0,
+    id: 1,
+    CountryCode: 1,
+    CardType: 1,
+    Segment: 1,
+    Bank: 1,
+    bank: 1,
+    cardBank: 1,
+    binBank: 1,
+    issuerBank: 1,
+    maskedPan: 1,
+    first6: 1,
+    last4: 1,
+    expMonth: 1,
+    expYear: 1,
+    holderName: 1,
+    zip: 1,
+    balance: 1,
+    balanceStatus: 1,
+    balanceAmount: 1,
+    authStatus: 1,
+    authAmount: 1,
+    authCurrency: 1,
+    amazonPayChargePermissionId: 1,
+    amazonPayChargeId: 1,
+    amazonPayCaptureStatus: 1,
+    amazonPayVoidStatus: 1,
+    lastAmazonPayAction: 1,
+    lastAmazonPayMessage: 1,
+    provider: 1,
+    lastLiveProvider: 1,
+    lastLiveOperation: 1,
+    lastLiveMessage: 1,
+    lastLiveResultCode: 1,
+    binlabel: 1,
+    verifyStatus: 1,
+    providerRef: 1,
+    failureReason: 1,
+    processingTimeMs: 1,
+    batchId: 1,
+    lineNumber: 1,
+    createdAt: 1,
+    updatedAt: 1
+  };
+}
+
+async function collectionDistinctValues(collection, field, filter = {}) {
+  const rows = await collection.aggregate([
+    { $match: { ...filter, [field]: { $nin: [null, ""] } } },
+    { $group: { _id: `$${field}` } },
+    { $sort: { _id: 1 } }
+  ]).toArray();
+  return rows.map((row) => row._id).filter((value) => value !== undefined && value !== null && value !== "");
+}
+
+function checkedCardValue(value, fallback = null) {
+  const text = readableBinPart(value);
+  return text || fallback;
+}
+
+function checkedCardCountry(binCheck = {}) {
+  return checkedCardValue(pickNestedValue(binCheck, [
+    "summary.countryCode",
+    "details.ISO Country Code A2",
+    "details.ISO Country Code A3",
+    "summary.country",
+    "details.ISO Country Name"
+  ]));
+}
+
+function checkedCardType(binCheck = {}, card = {}) {
+  return checkedCardValue(pickNestedValue(binCheck, [
+    "summary.type",
+    "details.Card Type",
+    "summary.brand",
+    "summary.scheme",
+    "details.Card Brand",
+    "details.Card Scheme"
+  ]), card.brand || null);
+}
+
+function checkedCardSegment(binCheck = {}) {
+  return checkedCardValue(pickNestedValue(binCheck, [
+    "summary.level",
+    "details.Card Level",
+    "details.Card Segment",
+    "details.Product"
+  ]), "STANDARD");
+}
+
+function checkedCardBank(binCheck = {}) {
+  return checkedCardValue(pickNestedValue(binCheck, [
+    "summary.issuer",
+    "details.Issuer Name / Bank",
+    "details.Issuer"
+  ]));
+}
+
+function checkedCardMaskedPan(card = {}) {
+  if (card.maskedPan) return card.maskedPan;
+  if (card.first6 && card.last4) return `${card.first6}******${card.last4}`;
+  if (card.last4) return `**** **** **** ${card.last4}`;
+  return null;
+}
+
+async function upsertCheckedCardFromLiveResult({ provider, operation, responseModel = {}, payload = {}, cardLog = {}, binCheck = null, userId = null }) {
+  if (!liveCheckerService.isLiveResponse(responseModel)) {
+    return null;
+  }
+
+  const normalized = normalizeCardDetails({ ...payload, ...cardLog });
+  const first6 = normalized.first6 || cardLog.first6 || payload.first6 || payload.bin || binCheck?.bin || null;
+  const last4 = normalized.last4 || cardLog.last4 || payload.last4 || null;
+  const expMonth = normalized.expMonth || cardLog.expMonth || payload.expMonth || null;
+  const expYear = normalized.expYear || cardLog.expYear || payload.expYear || null;
+  const maskedPan = checkedCardMaskedPan({
+    maskedPan: cardLog.maskedPan,
+    first6,
+    last4
+  });
+
+  if (!first6 && !last4 && !maskedPan) {
+    return null;
+  }
+
+  const result = responseModel.result || responseModel.providerResponse || {};
+  const providerRef = result.chargePermissionId ||
+    result.transactionId ||
+    result.cloverChargeId ||
+    result.pnref ||
+    responseModel.providerReferenceId ||
+    payload.chargePermissionId ||
+    payload.transactionId ||
+    payload.retref ||
+    null;
+  const now = new Date().toISOString();
+  const identity = [
+    provider,
+    first6 || "",
+    last4 || "",
+    expMonth || "",
+    expYear || "",
+    providerRef || ""
+  ].join("|");
+  const id = `checked:${crypto.createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
+  const amount = result.amount ?? responseModel.amount?.providerAmount ?? payload.amount ?? null;
+  const currency = result.currency || responseModel.amount?.currency || payload.currency || "USD";
+  const update = {
+    CountryCode: checkedCardCountry(binCheck) || payload.billingCountry || null,
+    CardType: checkedCardType(binCheck, { brand: normalized.brand }) || null,
+    Segment: checkedCardSegment(binCheck) || null,
+    Bank: checkedCardBank(binCheck) || null,
+    bank: checkedCardBank(binCheck) || null,
+    cardBank: checkedCardBank(binCheck) || null,
+    issuerBank: checkedCardBank(binCheck) || null,
+    maskedPan,
+    first6,
+    last4,
+    expMonth,
+    expYear,
+    holderName: normalized.cardholderName || payload.cardholderName || null,
+    zip: normalized.billingZip || payload.billingZip || payload.zip || null,
+    balance: amount ? `${amount} ${currency}` : "live",
+    balanceStatus: ["auth", "authorize", "sale", "charge", "balance"].includes(operation) ? responseModel.status : "verified",
+    balanceAmount: amount,
+    authStatus: ["auth", "authorize"].includes(operation) ? responseModel.status : undefined,
+    authAmount: ["auth", "authorize", "sale", "charge"].includes(operation) ? amount : undefined,
+    authCurrency: currency,
+    providerRef,
+    provider,
+    verifyStatus: "verified",
+    binlabel: responseModel.binCheckLine || formatBinCheckLine(binCheck) || null,
+    failureReason: null,
+    lastLiveProvider: provider,
+    lastLiveOperation: operation,
+    lastLiveMessage: responseModel.responseMessage || result.responseMessage || null,
+    lastLiveResultCode: responseModel.resultCode || result.resultCode || null,
+    lastCheckedByUserId: userId,
+    updatedAt: now
+  };
+  if (provider === "amazonpay") {
+    update.amazonPayChargePermissionId = result.chargePermissionId || payload.chargePermissionId || null;
+    update.amazonPayChargeId = result.chargeId || result.transactionId || null;
+  }
+
+  const cleanUpdate = Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined));
+  const database = await db.getDb();
+  await database.collection("CheckedCards").updateOne(
+    { id },
+    {
+      $setOnInsert: {
+        id,
+        createdAt: now
+      },
+      $set: cleanUpdate
+    },
+    { upsert: true }
+  );
+
+  return {
+    id,
+    maskedPan,
+    provider,
+    providerRef,
+    CountryCode: cleanUpdate.CountryCode,
+    CardType: cleanUpdate.CardType,
+    Segment: cleanUpdate.Segment,
+    Bank: cleanUpdate.Bank
+  };
+}
+
+function checkedCardAmazonPayReference(card, body = {}) {
+  return body.chargePermissionId ||
+    body.providerPaymentToken ||
+    body.source ||
+    body.token ||
+    card.amazonPayChargePermissionId ||
+    card.providerRef ||
+    card.providerReferenceId;
+}
+
+function checkedCardAmazonPayChargeId(card, body = {}) {
+  return body.chargeId ||
+    body.transactionId ||
+    body.retref ||
+    card.amazonPayChargeId;
+}
+
+function amazonPayCheckedCardPayload(card, operation, body = {}) {
+  const chargePermissionId = checkedCardAmazonPayReference(card, body);
+  const chargeId = checkedCardAmazonPayChargeId(card, body);
+  const payload = {
+    provider: "amazonpay",
+    operation,
+    chargePermissionId,
+    providerPaymentToken: chargePermissionId,
+    source: chargePermissionId,
+    token: chargePermissionId,
+    transactionId: chargeId,
+    chargeId,
+    amount: body.amount || card.authAmount || env.providers.amazonpay.authAmount || "0.20",
+    currency: body.currency || card.authCurrency || env.providers.amazonpay.currency || "USD",
+    reference: body.reference || `checked-card-${card.id}`,
+    runBinCheck: false
+  };
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function amazonPayActionRequiredId(operation) {
+  if (operation === "capture" || operation === "void") return "chargeId";
+  return "chargePermissionId";
+}
+
+function tokenRequiredResponse(card, operation, provider) {
+  return {
+    status: "failed",
+    resultCode: "TOKEN_REQUIRED",
+    responseMessage: "This record stores only masked PAN. Add a providerPaymentToken/provider reference before running live/auth/capture/balance.",
+    operation,
+    provider,
+    card: {
+      id: card.id,
+      maskedPan: card.maskedPan,
+      bin: card.bin,
+      last4: card.last4,
+      exp: card.exp
+    }
+  };
+}
+
+function isLiveOperationResponse(payload = {}, httpStatus = 200) {
+  const status = String(payload.status || payload.providerStatus || payload.result?.status || "").toLowerCase();
+  const code = String(payload.resultCode || payload.responseCode || payload.result?.resultCode || "").toLowerCase();
+  const message = String(payload.responseMessage || payload.message || "").toLowerCase();
+  return httpStatus >= 200 && httpStatus < 300 && (
+    ["success", "approved", "passed", "verified", "authorized", "captured"].includes(status) ||
+    ["success", "approved", "0", "00"].includes(code) ||
+    message.includes("approved") ||
+    message.includes("authorized") ||
+    message.includes("verified")
+  );
+}
+
+function providerPayloadFromMaskedRecord(card, provider, operation, body = {}) {
+  const token = body.providerPaymentToken || body.source || body.token || card.providerPaymentToken || card.providerReferenceId;
+  return {
+    provider,
+    operation,
+    providerPaymentToken: token,
+    source: provider === "clover" ? token : body.source,
+    token,
+    retref: body.retref || body.transactionId || card.providerReferenceId,
+    transactionId: body.transactionId || body.retref || card.providerReferenceId,
+    bin: card.bin,
+    first6: card.bin,
+    last4: card.last4,
+    expMonth: card.expMonth,
+    expYear: card.expYear,
+    billingZip: card.zip || "00000",
+    zip: card.zip || "00000",
+    postalCode: card.zip || "00000",
+    cardholderName: card.holderName,
+    amount: Number(body.amount || 1),
+    currency: body.currency || "usd",
+    runBinCheck: body.runBinCheck === true
+  };
+}
+
+async function runMaskedCardProviderOperation(req, card, provider, operation, body = {}) {
+  if (!(body.providerPaymentToken || body.source || body.token || card.providerPaymentToken || card.providerReferenceId)) {
+    return {
+      httpStatus: 400,
+      payload: tokenRequiredResponse(card, operation, provider)
+    };
+  }
+
+  const proxyReq = {
+    ...req,
+    body: providerPayloadFromMaskedRecord(card, provider, operation, body)
+  };
+  let httpStatus = 200;
+  let payload = null;
+  const proxyRes = {
+    status(code) {
+      httpStatus = code;
+      return this;
+    },
+    json(data) {
+      payload = data;
+      return data;
+    }
+  };
+
+  await runProviderCardOperation(proxyReq, proxyRes, { provider, operation });
+  return { httpStatus, payload };
+}
+
+async function runEncryptedUncheckedCardCheck({ mongo, card, body = {} }) {
+  const now = new Date().toISOString();
+  const result = await cardCheckService.checkCard(uncheckedCardCheckPayload(card, body));
+  const live = checkedStateFromServiceResult(result);
+  const binPatch = binPatchFromResult(result.binCheck);
+  const provider = String(body.provider || card.provider || "clover").toLowerCase();
+  const providerReferenceId = result.live?.providerReferenceId ||
+    result.live?.transactionId ||
+    result.live?.cloverChargeId ||
+    card.providerReferenceId ||
+    null;
+  const patch = {
+    checked: true,
+    live,
+    provider,
+    providerReferenceId,
+    ...binPatch,
+    lastCheck: {
+      provider,
+      operation: "live_then_bin",
+      httpStatus: 200,
+      response: redactSensitiveReportData(result)
+    },
+    updatedAt: now
+  };
+
+  await mongo.collection("uncheckedCards").updateOne({ id: card.id }, { $set: patch });
+
+  if (live) {
+    const verifiedId = `verified:${card.recordHash || card.id}`;
+    const checkedId = `checked:${card.recordHash || card.id}`;
+    const verifiedCard = {
+      id: checkedId,
+      verifiedCardId: verifiedId,
+      uncheckedCardId: card.id,
+      CountryCode: binPatch.countryCode || null,
+      CardType: binPatch.cardType || null,
+      Segment: binPatch.cardLevel || checkedCardSegment(result.binCheck) || null,
+      Bank: binPatch.bank || null,
+      bank: binPatch.bank || null,
+      cardBank: binPatch.bank || null,
+      issuerBank: binPatch.bank || null,
+      maskedPan: card.maskedPan,
+      first6: card.bin,
+      last4: card.last4,
+      expMonth: card.expMonth,
+      expYear: card.expYear,
+      holderName: card.holderName || "",
+      zip: card.zip || "00000",
+      balance: "0",
+      balanceStatus: "verified",
+      balanceAmount: 0,
+      provider,
+      providerRef: providerReferenceId,
+      verifyStatus: "verified",
+      binlabel: formatVerifiedBinLabel(result.binCheck),
+      failureReason: null,
+      lastLiveProvider: provider,
+      lastLiveOperation: "verification",
+      lastLiveMessage: result.live?.responseMessage || null,
+      lastLiveResultCode: result.live?.resultCode || null,
+      lastCheckResult: redactSensitiveReportData(result),
+      updatedAt: now
+    };
+
+    await mongo.collection("CheckedCards").updateOne(
+      { id: checkedId },
+      {
+        $setOnInsert: {
+          id: checkedId,
+          createdAt: now
+        },
+        $set: verifiedCard
+      },
+      { upsert: true }
+    );
+    await mongo.collection("verifiedCards").updateOne(
+      { id: verifiedId },
+      {
+        $setOnInsert: {
+          id: verifiedId,
+          checkedCardId: checkedId,
+          createdAt: now
+        },
+        $set: {
+          ...verifiedCard,
+          id: verifiedId,
+          checkedCardId: checkedId
+        }
+      },
+      { upsert: true }
+    );
+
+    await mongo.collection("checkedLiveCards").updateOne(
+      { uncheckedCardId: card.id },
+      {
+        $setOnInsert: {
+          id: uuidv4(),
+          uncheckedCardId: card.id,
+          createdAt: now
+        },
+        $set: {
+          maskedPan: card.maskedPan,
+          bin: card.bin,
+          last4: card.last4,
+          exp: card.exp,
+          holderName: card.holderName || null,
+          countryCode: binPatch.countryCode || card.countryCode || null,
+          bank: binPatch.bank || card.bank || null,
+          cardType: binPatch.cardType || card.cardType || null,
+          cardLevel: binPatch.cardLevel || card.cardLevel || null,
+          provider,
+          providerReferenceId,
+          live: true,
+          lastAction: "live_then_bin",
+          lastResult: redactSensitiveReportData(result),
+          updatedAt: now
+        }
+      },
+      { upsert: true }
+    );
+  }
+
+  return {
+    id: card.id,
+    maskedPan: card.maskedPan,
+    checked: true,
+    live,
+    provider,
+    providerReferenceId,
+    verifiedCardId: live ? `verified:${card.recordHash || card.id}` : null,
+    binCheck: result.binCheck,
+    liveCheck: result.live,
+    compact: result.compact
+  };
+}
+
+app.get("/api/unchecked-cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const mongo = await db.getDb();
+  const { page, pageSize, skip } = paginationFromQuery(req.query);
+  const filter = {};
+  if (req.query.checked === "true") filter.checked = true;
+  if (req.query.checked === "false") filter.checked = { $ne: true };
+  if (req.query.q) {
+    const q = String(req.query.q).trim();
+    filter.$or = [
+      { maskedPan: { $regex: q, $options: "i" } },
+      { bin: { $regex: q, $options: "i" } },
+      { last4: { $regex: q, $options: "i" } },
+      { bank: { $regex: q, $options: "i" } },
+      { holderName: { $regex: q, $options: "i" } }
+    ];
+  }
+
+  const [rows, total] = await Promise.all([
+    mongo.collection("uncheckedCards").find(filter, { projection: maskOnlyProjection() })
+      .sort({ createdAt: -1, sourceLineNumber: 1 })
+      .skip(skip)
+      .limit(pageSize)
+      .toArray(),
+    mongo.collection("uncheckedCards").countDocuments(filter)
+  ]);
+
+  res.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize))
+  });
+}));
+
+app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"), asyncHandler(async (req, res) => {
+  const mongo = await db.getDb();
+  const now = new Date().toISOString();
+  const rawCards = [];
+  if (Array.isArray(req.body.cards)) {
+    rawCards.push(...req.body.cards);
+  } else if (req.body.cardsText) {
+    String(req.body.cardsText)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => rawCards.push({ line }));
+  } else {
+    rawCards.push(req.body);
+  }
+
+  if (!rawCards.length) {
+    return res.status(400).json({ status: "failed", responseMessage: "At least one card is required" });
+  }
+
+  const rows = [];
+  const errors = [];
+  for (const [index, raw] of rawCards.entries()) {
+    try {
+      const normalized = normalizeUncheckedCardLinePayload(raw);
+      const recordHash = cardCheckService.recordHash(normalized);
+      const update = {
+        recordHash,
+        maskedPan: cardCheckService.maskPan(normalized.pan),
+        bin: normalized.pan.slice(0, 6),
+        last4: normalized.pan.slice(-4),
+        exp: normalized.exp,
+        expMonth: normalized.expMonth,
+        expYear: normalized.expYear,
+        zip: normalized.zip,
+        holderName: normalized.holderName,
+        address: normalized.address,
+        phone: String(raw.phone || normalized.phone || "").trim() || null,
+        panEncrypted: encrypt(normalized.pan),
+        cvvEncrypted: encrypt(normalized.cvv),
+        checked: false,
+        live: false,
+        provider: normalizeProviderKey(req.body.provider || raw.provider || "clover"),
+        updatedAt: now
+      };
+      const id = `unchecked:${recordHash}`;
+      await mongo.collection("uncheckedCards").updateOne(
+        { recordHash },
+        {
+          $setOnInsert: {
+            id,
+            correlationId: `manual-${recordHash}`,
+            source: "manual",
+            sourceLineNumber: index + 1,
+            createdAt: now
+          },
+          $set: update
+        },
+        { upsert: true }
+      );
+      const saved = await mongo.collection("uncheckedCards").findOne({ recordHash }, { projection: maskOnlyProjection() });
+      rows.push(uncheckedCardPublicFields(saved));
+    } catch (error) {
+      errors.push({ index: index + 1, message: error.message });
+    }
+  }
+
+  res.status(errors.length ? 207 : 201).json({
+    status: errors.length ? "partial" : "created",
+    inserted: rows.length,
+    errors,
+    rows
+  });
+}));
+
+app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const mongo = await db.getDb();
+  const card = await mongo.collection("uncheckedCards").findOne({ id: req.params.cardId }, { projection: { _id: 0 } });
+  if (!card) {
+    return res.status(404).json({ status: "failed", responseMessage: "Unchecked card not found" });
+  }
+
+  if (card.panEncrypted) {
+    const result = await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body });
+    return res.json(result);
+  }
+
+  const provider = normalizeProviderKey(req.body.provider || card.provider || "clover");
+  const { httpStatus, payload } = await runMaskedCardProviderOperation(req, card, provider, "live", {
+    ...req.body,
+    runBinCheck: true
+  });
+  const checked = httpStatus >= 200 && httpStatus < 500 && payload?.resultCode !== "TOKEN_REQUIRED";
+  const live = isLiveOperationResponse(payload, httpStatus);
+  const now = new Date().toISOString();
+  await mongo.collection("uncheckedCards").updateOne(
+    { id: card.id },
+    {
+      $set: {
+        checked,
+        live,
+        provider,
+        providerReferenceId: payload?.providerReferenceId || payload?.transactionId || payload?.id || card.providerReferenceId || null,
+        lastCheck: {
+          provider,
+          operation: "live",
+          httpStatus,
+          response: redactSensitiveReportData(payload || {})
+        },
+        updatedAt: now
+      }
+    }
+  );
+
+  if (live) {
+    await mongo.collection("checkedLiveCards").updateOne(
+      { uncheckedCardId: card.id },
+      {
+        $setOnInsert: {
+          id: uuidv4(),
+          uncheckedCardId: card.id,
+          createdAt: now
+        },
+        $set: {
+          maskedPan: card.maskedPan,
+          bin: card.bin,
+          last4: card.last4,
+          exp: card.exp,
+          holderName: card.holderName || null,
+          countryCode: card.countryCode || null,
+          bank: card.bank || null,
+          cardType: card.cardType || null,
+          cardLevel: card.cardLevel || null,
+          provider,
+          providerReferenceId: payload?.providerReferenceId || payload?.transactionId || payload?.id || card.providerReferenceId || null,
+          live: true,
+          lastAction: "live",
+          lastResult: redactSensitiveReportData(payload || {}),
+          updatedAt: now
+        }
+      },
+      { upsert: true }
+    );
+  }
+
+  res.status(httpStatus).json({
+    ...payload,
+    checked,
+    live
+  });
+}));
+
+app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const start = Math.max(1, Number(req.body.start || req.body.from || 1));
+  const end = Math.max(start, Number(req.body.end || req.body.to || start));
+  const limit = Math.min(100, end - start + 1);
+  const delayMs = Math.min(5000, Math.max(250, Number(req.body.delayMs || 750)));
+  const mongo = await db.getDb();
+  const cards = await mongo.collection("uncheckedCards")
+    .find({ checked: { $ne: true }, panEncrypted: { $exists: true, $ne: null } }, { projection: { _id: 0 } })
+    .sort({ createdAt: -1, sourceLineNumber: 1 })
+    .skip(start - 1)
+    .limit(limit)
+    .toArray();
+  const results = [];
+
+  for (const [index, card] of cards.entries()) {
+    try {
+      results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body }));
+    } catch (error) {
+      const now = new Date().toISOString();
+      await mongo.collection("uncheckedCards").updateOne(
+        { id: card.id },
+        {
+          $set: {
+            checked: true,
+            live: false,
+            lastCheck: {
+              provider: req.body.provider || card.provider || "clover",
+              operation: "live_then_bin",
+              httpStatus: error.statusCode || 500,
+              response: redactSensitiveReportData({ message: error.message })
+            },
+            updatedAt: now
+          }
+        }
+      );
+      results.push({
+        id: card.id,
+        maskedPan: card.maskedPan,
+        checked: true,
+        live: false,
+        error: error.message
+      });
+    }
+    if (index < cards.length - 1) {
+      await sleep(delayMs);
+    }
+  }
+
+  res.json({
+    status: "completed",
+    requested: { start, end, count: end - start + 1, processedLimit: limit, delayMs },
+    processed: results.length,
+    results
+  });
+}));
+
+app.get("/api/checked-live-cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const mongo = await db.getDb();
+  const { page, pageSize, skip } = paginationFromQuery(req.query);
+  const filter = {};
+  if (req.query.q) {
+    const q = String(req.query.q).trim();
+    filter.$or = [
+      { maskedPan: { $regex: q, $options: "i" } },
+      { bin: { $regex: q, $options: "i" } },
+      { last4: { $regex: q, $options: "i" } },
+      { bank: { $regex: q, $options: "i" } },
+      { provider: { $regex: q, $options: "i" } }
+    ];
+  }
+
+  const [rows, total] = await Promise.all([
+    mongo.collection("checkedLiveCards").find(filter, { projection: checkedLiveProjection() })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize)
+      .toArray(),
+    mongo.collection("checkedLiveCards").countDocuments(filter)
+  ]);
+
+  res.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize))
+  });
+}));
+
+app.get("/api/checked-cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  const mongo = await db.getDb();
+  const { page, pageSize, skip } = paginationFromQuery(req.query);
+  const filter = {};
+  const country = String(req.query.country || "").trim();
+  const cardType = String(req.query.cardType || "").trim();
+  const segment = String(req.query.segment || "").trim();
+
+  if (country) filter.CountryCode = country;
+  if (cardType) filter.CardType = cardType;
+  if (segment) filter.Segment = segment;
+  if (req.query.q) {
+    const q = String(req.query.q).trim();
+    filter.$or = [
+      { maskedPan: { $regex: q, $options: "i" } },
+      { holderName: { $regex: q, $options: "i" } },
+      { binlabel: { $regex: q, $options: "i" } }
+    ];
+  }
+
+  const checkedCards = mongo.collection("CheckedCards");
+  const [rows, total, countries, cardTypes, segments] = await Promise.all([
+    checkedCards.find(filter, { projection: checkedCardsProjection() })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize)
+      .toArray(),
+    checkedCards.countDocuments(filter),
+    collectionDistinctValues(checkedCards, "CountryCode"),
+    collectionDistinctValues(checkedCards, "CardType"),
+    collectionDistinctValues(checkedCards, "Segment")
+  ]);
+
+  res.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    filters: {
+      countries: countries.sort(),
+      cardTypes: cardTypes.sort(),
+      segments: segments.sort()
+    }
+  });
+}));
+
+app.post("/api/checked-cards/:cardId/amazonpay/action", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const allowed = new Set(["live", "auth", "authorize", "balance", "balance_check", "sale", "capture", "void"]);
+  const requestedOperation = String(req.body.operation || "").toLowerCase();
+  if (!allowed.has(requestedOperation)) {
+    return res.status(400).json({ status: "failed", responseMessage: "Unsupported Amazon Pay checked-card action" });
+  }
+
+  const mongo = await db.getDb();
+  const card = await mongo.collection("CheckedCards").findOne({ id: req.params.cardId }, { projection: checkedCardsProjection() });
+  if (!card) {
+    return res.status(404).json({ status: "failed", responseMessage: "Checked card not found" });
+  }
+
+  const operationMap = {
+    live: "verification",
+    auth: "auth",
+    authorize: "auth",
+    balance: "verification",
+    balance_check: "verification",
+    sale: "sale",
+    capture: "capture",
+    void: "void"
+  };
+  const providerOperation = operationMap[requestedOperation];
+  const requiredId = amazonPayActionRequiredId(providerOperation);
+  const requiredValue = requiredId === "chargeId"
+    ? checkedCardAmazonPayChargeId(card, req.body)
+    : checkedCardAmazonPayReference(card, req.body);
+  if (!requiredValue) {
+    return res.status(400).json({
+      status: "failed",
+      resultCode: requiredId === "chargeId" ? "AMAZONPAY_CHARGE_ID_REQUIRED" : "AMAZONPAY_CHARGE_PERMISSION_REQUIRED",
+      responseMessage: requiredId === "chargeId"
+        ? "Amazon Pay capture/void needs a previous chargeId from an approved auth or sale."
+        : "Amazon Pay live/auth/balance/sale needs a buyer-approved chargePermissionId. Create/complete an Amazon Pay checkout session first.",
+      provider: "amazonpay",
+      operation: requestedOperation
+    });
+  }
+
+  const proxyReq = {
+    ...req,
+    body: amazonPayCheckedCardPayload(card, providerOperation, req.body)
+  };
+  let httpStatus = 200;
+  let payload = null;
+  const proxyRes = {
+    status(code) {
+      httpStatus = code;
+      return this;
+    },
+    json(data) {
+      payload = data;
+      return data;
+    }
+  };
+
+  await runProviderCardOperation(proxyReq, proxyRes, {
+    provider: "amazonpay",
+    operation: providerOperation,
+    actionOverride: `amazonpay_checked_card_${requestedOperation}`
+  });
+
+  const result = payload?.result || payload || {};
+  const approved = isLiveOperationResponse(result, httpStatus) || isLiveOperationResponse(payload, httpStatus);
+  const amount = result.amount || payload?.amount || proxyReq.body.amount;
+  const currency = result.currency || payload?.currency || proxyReq.body.currency;
+  const chargePermissionId = result.chargePermissionId || payload?.chargePermissionId || proxyReq.body.chargePermissionId || null;
+  const chargeId = result.chargeId || result.transactionId || payload?.transactionId || proxyReq.body.chargeId || null;
+  const message = result.responseMessage || payload?.responseMessage || payload?.failureReason || "";
+  const now = new Date().toISOString();
+  const patch = {
+    providerRef: chargePermissionId || card.providerRef || null,
+    amazonPayChargePermissionId: chargePermissionId || card.amazonPayChargePermissionId || null,
+    lastAmazonPayAction: requestedOperation,
+    lastAmazonPayMessage: message,
+    updatedAt: now
+  };
+
+  if (providerOperation === "auth") {
+    patch.authStatus = approved ? "authorized" : "review";
+    patch.authAmount = amount;
+    patch.authCurrency = currency;
+    patch.balanceStatus = approved ? "authorized" : "review";
+    patch.balanceAmount = approved ? amount : card.balanceAmount || null;
+    patch.balance = approved ? `${amount} ${currency}` : card.balance || "review";
+    if (chargeId) patch.amazonPayChargeId = chargeId;
+  }
+  if (requestedOperation === "balance" || requestedOperation === "balance_check" || requestedOperation === "live") {
+    patch.balanceStatus = approved ? "verified" : "review";
+    patch.verifyStatus = approved ? "verified" : card.verifyStatus || "review";
+  }
+  if (providerOperation === "sale") {
+    patch.authStatus = approved ? "captured" : "review";
+    patch.authAmount = amount;
+    patch.authCurrency = currency;
+    patch.balanceStatus = approved ? "captured" : "review";
+    patch.balanceAmount = approved ? amount : card.balanceAmount || null;
+    patch.balance = approved ? `${amount} ${currency}` : card.balance || "review";
+    if (chargeId) patch.amazonPayChargeId = chargeId;
+  }
+  if (providerOperation === "capture") {
+    patch.amazonPayCaptureStatus = approved ? "captured" : "review";
+    patch.balanceStatus = approved ? "captured" : "review";
+    patch.balance = approved ? `${amount} ${currency}` : card.balance || "review";
+  }
+  if (providerOperation === "void") {
+    patch.amazonPayVoidStatus = approved ? "voided" : "review";
+    patch.authStatus = approved ? "voided" : card.authStatus || "review";
+  }
+
+  await mongo.collection("CheckedCards").updateOne({ id: card.id }, { $set: patch });
+  res.status(httpStatus).json({
+    ...payload,
+    checkedCard: {
+      id: card.id,
+      provider: "amazonpay",
+      operation: requestedOperation,
+      state: patch
+    }
+  });
+}));
+
+app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const allowed = new Set(["capture", "live", "auth", "authorize", "balance"]);
+  const operation = String(req.body.operation || "").toLowerCase();
+  if (!allowed.has(operation)) {
+    return res.status(400).json({ status: "failed", responseMessage: "Unsupported checked-live action" });
+  }
+
+  const mongo = await db.getDb();
+  const card = await mongo.collection("checkedLiveCards").findOne({ id: req.params.cardId }, { projection: checkedLiveProjection() });
+  if (!card) {
+    return res.status(404).json({ status: "failed", responseMessage: "Checked live card not found" });
+  }
+
+  const provider = normalizeProviderKey(req.body.provider || card.provider || "clover");
+  const providerCard = {
+    ...card,
+    providerReferenceId: req.body.transactionId || req.body.retref || card.providerReferenceId,
+    providerPaymentToken: req.body.providerPaymentToken || card.providerPaymentToken
+  };
+  const providerOperation = operation === "authorize" ? "auth" : operation;
+  const { httpStatus, payload } = await runMaskedCardProviderOperation(req, providerCard, provider, providerOperation, req.body);
+  const now = new Date().toISOString();
+  const statePatch = {
+    provider,
+    lastAction: providerOperation,
+    lastResult: redactSensitiveReportData(payload || {}),
+    updatedAt: now
+  };
+  if (providerOperation === "capture") statePatch.capture = isLiveOperationResponse(payload, httpStatus);
+  if (providerOperation === "auth") statePatch.auth = isLiveOperationResponse(payload, httpStatus);
+  if (providerOperation === "live") statePatch.live = isLiveOperationResponse(payload, httpStatus);
+  if (providerOperation === "balance") statePatch.balance = isLiveOperationResponse(payload, httpStatus) ? "checked" : "review";
+
+  await mongo.collection("checkedLiveCards").updateOne({ id: card.id }, { $set: statePatch });
+  res.status(httpStatus).json(payload);
+}));
+
 app.post("/api/provider-operations/cards", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
   await runProviderCardOperation(req, res, {
     provider: req.body.provider,
@@ -5135,14 +6499,126 @@ app.post("/api/provider-operations/cards", requireAuth, requirePermission("canRu
   });
 }));
 
+app.post(["/api/checkers/bincheck", "/api/checkers/bin-check"], requireAuth, requirePermission("canRunBinCheck"), asyncHandler(async (req, res) => {
+  const result = await cardCheckService.binCheckCard(req.body || {});
+
+  await writeAuditLog({
+    entityType: "checker",
+    entityId: result.bin || String(req.body?.bin || req.body?.pan || req.body?.cardNumber || "").replace(/\D/g, "").slice(0, 6) || "manual-bin",
+    action: "cardcheck_bincheck",
+    status: result.status || "unknown",
+    actorUserId: req.user.id,
+    details: redactSensitiveReportData({
+      request: req.body || {},
+      result
+    })
+  });
+
+  res.json({
+    ...result,
+    endpoint: "bincheck"
+  });
+}));
+
+app.post(["/api/checkers/livecheck", "/api/checkers/live-check"], requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const result = await cardCheckService.liveCheckCard(req.body || {});
+  const binCheck = req.body?.runBinCheck === true && req.user.permissions.canRunBinCheck
+    ? await cardCheckService.binCheckCard(req.body || {})
+    : null;
+  const response = {
+    ...result,
+    ...(binCheck ? { binCheck, binCheckLine: formatBinCheckLine(binCheck) } : {}),
+    endpoint: "livecheck"
+  };
+  const checkedCard = await upsertCheckedCardFromLiveResult({
+    provider: response.provider || normalizeProviderKey(req.body.provider),
+    operation: response.operation || "live",
+    responseModel: response,
+    payload: req.body || {},
+    cardLog: buildCardLogSnapshot(req.body || {}),
+    binCheck,
+    userId: req.user?.id || null
+  });
+  if (checkedCard) {
+    response.checkedCard = checkedCard;
+  }
+
+  await writeAuditLog({
+    entityType: "checker",
+    entityId: response.providerReferenceId || String(req.body?.pan || req.body?.cardNumber || req.body?.chargePermissionId || "manual-live").replace(/\D/g, "").slice(-6) || "manual-live",
+    action: "cardcheck_livecheck",
+    status: liveCheckerService.isLiveResponse(result) ? "success" : result.status || "review",
+    actorUserId: req.user.id,
+    details: redactSensitiveReportData({
+      request: req.body || {},
+      result: response
+    })
+  });
+
+  if (req.body?.compact === true || req.query.compact === "1") {
+    return res.json({
+      ...liveCheckerService.toCompactLiveCheckerResponse(response),
+      endpoint: "livecheck"
+    });
+  }
+
+  res.json(response);
+}));
+
 app.post("/api/checkers/live-checker", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
   req.body.runBinCheck = true;
-  await runProviderCardOperation(req, res, {
+  const liveCheckerOperation = String(req.body.operation || "verification").toLowerCase();
+  let capturedStatus = 200;
+  let capturedPayload = null;
+  const proxyRes = {
+    status(statusCode) {
+      capturedStatus = statusCode;
+      return this;
+    },
+    json(payload) {
+      capturedPayload = payload;
+      return payload;
+    }
+  };
+  await runProviderCardOperation(req, proxyRes, {
     provider: req.body.provider,
-    operation: req.body.operation || "verification",
+    operation: liveCheckerOperation,
     skipBinAttemptLog: true,
     actionOverride: `${normalizeProviderKey(req.body.provider)}_live_checker`
   });
+
+  const checkedCard = await upsertCheckedCardFromLiveResult({
+    provider: capturedPayload?.provider || normalizeProviderKey(req.body.provider),
+    operation: capturedPayload?.operation || liveCheckerOperation,
+    responseModel: capturedPayload || {},
+    payload: capturedPayload?.request || req.body || {},
+    cardLog: capturedPayload?.card || {},
+    binCheck: capturedPayload?.binCheck || null,
+    userId: req.user?.id || null
+  });
+
+  if (capturedPayload?.binCheck && checkedCard) {
+    capturedPayload.binCheck = {
+      ...capturedPayload.binCheck,
+      isLive: true,
+      IsLive: true,
+      checkedCard
+    };
+  }
+  if (checkedCard) {
+    capturedPayload = {
+      ...capturedPayload,
+      checkedCard
+    };
+  }
+
+  if (req.body.compact === true || req.query.compact === "1") {
+    return res.status(capturedStatus).json({
+      ...liveCheckerService.toCompactLiveCheckerResponse(capturedPayload || {}),
+      checkedCard: checkedCard || null
+    });
+  }
+  return res.status(capturedStatus).json(capturedPayload);
 }));
 
 app.post("/api/checkers/balance", requireAuth, requirePermission("canRunBalanceCheck"), asyncHandler(async (req, res) => {
@@ -5833,6 +7309,19 @@ app.get("/api/provider-reports", requireAuth, requirePermission("canListCards"),
         },
         missing: reportsByKey.zoho.missing,
         optionalMissing: reportsByKey.zoho.optionalMissing
+      },
+      amazonpay: {
+        required: ["AMAZON_PAY_STORE_ID", "AMAZON_PAY_MERCHANT_ID", "AMAZON_PAY_PUBLIC_KEY_ID or AMAZON_PAY_APIKEY", "AMAZON_PAY_PRIVATE_KEY or AMAZON_PAY_PRIVATE_KEY_BASE64 or AMAZON_PAY_PRIVATE_KEY_FILE"],
+        recommendedDev: {
+          AMAZON_PAY_REGION: env.providers.amazonpay.region || "us",
+          AMAZON_PAY_SANDBOX: String(env.providers.amazonpay.sandbox),
+          AMAZON_PAY_CURRENCY: env.providers.amazonpay.currency || "USD",
+          AMAZON_PAY_AUTH_AMOUNT: env.providers.amazonpay.authAmount || "0.20",
+          AMAZON_PAY_CHECKOUT_REVIEW_RETURN_URL: env.providers.amazonpay.checkoutReviewReturnUrl || "required for checkout session creation",
+          AMAZON_PAY_CHECKOUT_RESULT_RETURN_URL: env.providers.amazonpay.checkoutResultReturnUrl || "required for checkout session creation",
+          AMAZON_PAY_TEST_CHARGE_PERMISSION_ID: env.providers.amazonpay.testChargePermissionId || "optional live status probe id"
+        },
+        missing: reportsByKey.amazonpay.missing
       },
       globalpayments: {
         required: ["GLOBALPAYMENTS_APP_ID or GLOBALPAYMENTS_PUBLIC_API_KEY", "GLOBALPAYMENTS_APP_KEY or GLOBALPAYMENTS_SECRET_API_KEY"],
@@ -6801,8 +8290,8 @@ app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermiss
     notes
   } = req.body;
 
-  if (!provider || !["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
+  if (!provider || !["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, amazonpay, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
   }
 
   if (!verificationStatus || !["pending", "verified", "declined", "review"].includes(verificationStatus)) {

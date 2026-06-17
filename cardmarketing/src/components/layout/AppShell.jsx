@@ -1,5 +1,7 @@
 const routes = [
   ['checkers', 'Card Checkers'],
+  ['checked-cards', 'Checked Cards'],
+  ['unchecked-cards', 'Unchecked Cards'],
   ['payment-processors', 'Payment Processors'],
   ['debt-management', 'Debt Ops'],
   ['cards', 'Cards'],

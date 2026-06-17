@@ -14,6 +14,15 @@ const globalPaymentsEnv = process.env.GLOBALPAYMENTS_ENV || "sandbox";
 const braintreeEnv = process.env.BRAINTREE_ENV || "sandbox";
 const nmiEnv = process.env.NMI_ENV || "production";
 const zohoPaymentsEnv = process.env.ZOHO_PAYMENTS_ENV || process.env.ZOHO_PAYMENT_ENV || "production";
+const amazonPayPublicKeyId = optionalEnv("AMAZON_PAY_PUBLIC_KEY_ID") || optionalEnv("AMAZON_PAY_APIKEY");
+const amazonPaySandboxEnv = optionalEnv("AMAZON_PAY_SANDBOX");
+const amazonPaySandbox = amazonPayPublicKeyId.toUpperCase().startsWith("SANDBOX")
+  ? true
+  : amazonPayPublicKeyId.toUpperCase().startsWith("LIVE")
+    ? false
+    : amazonPaySandboxEnv
+      ? boolEnv("AMAZON_PAY_SANDBOX")
+      : false;
 const databaseName = process.env.MONGODB_DATABASE || "cloverapp";
 
 function requireEnv(name) {
@@ -155,6 +164,32 @@ module.exports = {
         user: optionalEnv("PAYPAL_MANAGER_USER"),
         password: optionalEnv("PAYPAL_MANAGER_PASSWORD") || optionalEnv("PAYPAL_MANAGER_PWD")
       }
+    },
+    amazonpay: {
+      storeId: optionalEnv("AMAZON_PAY_STORE_ID"),
+      merchantId: optionalEnv("AMAZON_PAY_MERCHANT_ID"),
+      publicKeyId: amazonPayPublicKeyId,
+      privateKey: optionalEnv("AMAZON_PAY_PRIVATE_KEY"),
+      privateKeyBase64: optionalEnv("AMAZON_PAY_PRIVATE_KEY_BASE64"),
+      privateKeyFile: optionalEnv("AMAZON_PAY_PRIVATE_KEY_FILE") || optionalEnv("AMAZON_PAY_PRIVATE_KEY_PATH"),
+      clientSecret: optionalEnv("AMAZON_PAY_CLIENT_SECRET") || optionalEnv("AMAZON_CLIENT_SECRET"),
+      baseUrl: optionalEnv("AMAZON_API_BASE_URL", "https://pay-api.amazon.com/:version"),
+      region: optionalEnv("AMAZON_PAY_REGION", "us"),
+      sandbox: amazonPaySandbox,
+      algorithm: optionalEnv("AMAZON_PAY_SIGNING_ALGORITHM"),
+      currency: optionalEnv("AMAZON_PAY_CURRENCY", "USD"),
+      authAmount: optionalEnv("AMAZON_PAY_AUTH_AMOUNT", "0.20"),
+      checkoutReviewReturnUrl: optionalEnv("AMAZON_PAY_CHECKOUT_REVIEW_RETURN_URL"),
+      checkoutResultReturnUrl: optionalEnv("AMAZON_PAY_CHECKOUT_RESULT_RETURN_URL"),
+      legacySellerId: optionalEnv("AMAZON_PAY_LEGACY_SELLER_ID") || optionalEnv("AMAZON_SELLER_ID") || optionalEnv("AMAZON_PAY_MERCHANT_ID"),
+      legacyAccessKey: optionalEnv("AMAZON_PAY_LEGACY_ACCESS_KEY") || optionalEnv("AMAZON_MWS_KEY_ID"),
+      legacySecretAccessKey: optionalEnv("AMAZON_PAY_LEGACY_SECRET_ACCESS_KEY") || optionalEnv("AMAZON_SECRET_ACCESS_KEY"),
+      legacyLwaClientId: optionalEnv("AMAZON_PAY_LEGACY_LWA_CLIENT_ID") || optionalEnv("AMAZON_CLIENT_ID") || optionalEnv("AMAZON_PAY_STORE_ID"),
+      legacyReturnUrl: optionalEnv("AMAZON_PAY_LEGACY_RETURN_URL", "https://softprofessionalservices.com/"),
+      legacyCancelReturnUrl: optionalEnv("AMAZON_PAY_LEGACY_CANCEL_RETURN_URL", "https://softprofessionalservices.com/"),
+      legacySignature: optionalEnv("AMAZON_PAY_LEGACY_SIGNATURE", "gMELqpRVQO6XVCNGdgikQnWN3CjTCt2TeIVqLaJTaHc%3D"),
+      testChargePermissionId: optionalEnv("AMAZON_PAY_TEST_CHARGE_PERMISSION_ID"),
+      timeoutMs: Number(optionalEnv("AMAZON_PAY_TIMEOUT_MS", "180000"))
     },
     fluidpay: {
       baseUrl: optionalEnv(

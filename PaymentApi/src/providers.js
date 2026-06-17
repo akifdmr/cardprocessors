@@ -40,6 +40,31 @@ function getPublicProviderConfig() {
         )
       }
     },
+    amazonpay: {
+      baseUrl: env.providers.amazonpay.baseUrl,
+      storeConfigured: Boolean(env.providers.amazonpay.storeId),
+      merchantConfigured: Boolean(env.providers.amazonpay.merchantId),
+      publicKeyConfigured: Boolean(env.providers.amazonpay.publicKeyId),
+      privateKeyConfigured: Boolean(
+        env.providers.amazonpay.privateKey ||
+        env.providers.amazonpay.privateKeyBase64 ||
+        env.providers.amazonpay.privateKeyFile
+      ),
+      region: env.providers.amazonpay.region,
+      sandbox: env.providers.amazonpay.sandbox,
+      currency: env.providers.amazonpay.currency,
+      authAmount: env.providers.amazonpay.authAmount,
+      configured: Boolean(
+        env.providers.amazonpay.storeId &&
+        env.providers.amazonpay.merchantId &&
+        env.providers.amazonpay.publicKeyId &&
+        (
+          env.providers.amazonpay.privateKey ||
+          env.providers.amazonpay.privateKeyBase64 ||
+          env.providers.amazonpay.privateKeyFile
+        )
+      )
+    },
     fluidpay: {
       baseUrl: env.providers.fluidpay.baseUrl,
       processorId: env.providers.fluidpay.processorId || null,

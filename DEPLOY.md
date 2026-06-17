@@ -14,6 +14,14 @@ Use Render as a single Node web service. The React app builds into `PaymentApi/p
 
 ## Commands
 
+Local full-stack startup:
+
+```sh
+npm run up
+```
+
+`up` runs MongoDB index migration, starts PaymentApi, waits for `/health`, then starts the React app at `/react/`.
+
 Render uses:
 
 ```sh

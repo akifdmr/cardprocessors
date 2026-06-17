@@ -361,10 +361,11 @@ function normalizeFraudChecks(charge) {
   };
 }
 
-async function verifyCard({ source }) {
+async function verifyCard({ source, zip = "00000", billingZip, postalCode }) {
   getCloverConfig(); // sadece config var mı kontrolü
   if (!source) throw new Error("source is required");
   const tokenized = String(source).startsWith("clv_");
+  const submittedZip = String(zip || billingZip || postalCode || "00000").replace(/\D/g, "") || "00000";
   return {
     status: tokenized ? "verified" : "review",
     resultCode: tokenized ? "CLOVER_CARD_VERIFIED" : "CLOVER_TOKEN_REVIEW",
@@ -375,13 +376,15 @@ async function verifyCard({ source }) {
     preauthorizationCreated: false,
     amount: 0,
     sourceToken: `${String(source).slice(0, 6)}...${String(source).slice(-4)}`,
+    zip: submittedZip,
+    billingZip: submittedZip,
     responseMessage: tokenized
       ? "Clover card verification tamamlandı. Charge/preauth oluşturulmadı ve karttan tutar alınmadı."
       : "Clover source token gözden geçirilmeli. Charge/preauth oluşturulmadı.",
     message: tokenized
       ? "Clover card verification tamamlandı. Charge/preauth oluşturulmadı ve karttan tutar alınmadı."
       : "Clover source token gözden geçirilmeli. Charge/preauth oluşturulmadı.",
-    fraudChecks: { cvcCheck: null, addressLine1Check: null, addressZipCheck: null }
+    fraudChecks: { cvcCheck: null, addressLine1Check: null, addressZipCheck: submittedZip ? "provided" : null }
   };
 }
 

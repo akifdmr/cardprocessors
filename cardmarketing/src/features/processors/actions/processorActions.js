@@ -5,6 +5,11 @@ function withDefaultZip(payload) {
   return { ...payload, billingZip, zip: payload.zip || billingZip, postalCode: payload.postalCode || billingZip }
 }
 
+function parseJsonField(value) {
+  if (!value || typeof value !== 'string') return value
+  return JSON.parse(value)
+}
+
 export const processorActionComponents = {
   propelrpay: {
     normalize(payload) {
@@ -44,6 +49,16 @@ export const processorActionComponents = {
       return { ...withDefaultZip(payload), amount: payload.amount ? moneyValue(payload.amount) : payload.amount }
     },
   },
+  amazonpay: {
+    normalize(payload) {
+      return {
+        ...payload,
+        amount: payload.amount ? moneyValue(payload.amount) : payload.amount,
+        currency: payload.currency || 'USD',
+        deliverySpecifications: parseJsonField(payload.deliverySpecifications),
+      }
+    },
+  },
   quiklie: {
     normalize(payload) {
       const next = withDefaultZip(payload)
@@ -79,6 +94,7 @@ export function normalizeProviderKey(provider) {
   if (key === 'globalpayments' || key === 'global-payments' || key === 'portico') return 'globalpayments'
   if (key === 'networkmerchants' || key === 'network-merchants') return 'nmi'
   if (key === 'zohopayments' || key === 'zoho-payments' || key === 'zoho_payment') return 'zoho'
+  if (key === 'amazon' || key === 'amazon-pay' || key === 'amazon_pay' || key === 'amazonpayments') return 'amazonpay'
   if (key === 'quikliepay' || key === 'quiklie-payment' || key === 'quicklie' || key === 'quickliepay' || key === 'quicklie-payment') return 'quiklie'
   return key
 }

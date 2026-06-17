@@ -1,6 +1,6 @@
 import { normalizeProviderKey } from './processorActions'
 
-const supportedRowActionProviders = new Set(['propelrpay', 'fluidpay', 'globalpayments', 'paypal', 'braintree', 'nmi', 'zoho', 'quiklie', 'clover'])
+const supportedRowActionProviders = new Set(['propelrpay', 'fluidpay', 'globalpayments', 'paypal', 'amazonpay', 'braintree', 'nmi', 'zoho', 'quiklie', 'clover'])
 
 export const processorActionConfigs = {
   void: {
@@ -44,6 +44,7 @@ export function processorTransactionId(log) {
     log.transactionId ||
     log.responseModel?.transactionId ||
     log.raw_response?.result?.transactionId ||
+    log.raw_response?.result?.chargeId ||
     log.raw_response?.result?.retref ||
     log.raw_response?.result?.cloverChargeId ||
     log.raw_response?.providerResponse?.transactionId ||
@@ -51,6 +52,7 @@ export function processorTransactionId(log) {
     log.raw_response?.request?.transactionId ||
     log.raw_response?.request?.retref ||
     log.responseModel?.result?.transactionId ||
+    log.responseModel?.result?.chargeId ||
     log.responseModel?.result?.retref ||
     log.responseModel?.result?.cloverChargeId ||
     log.responseModel?.providerResponse?.transactionId ||

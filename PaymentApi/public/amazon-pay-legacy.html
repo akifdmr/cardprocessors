@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon Pay Legacy Widget Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: #f6f8fb;
+      color: #172033;
+    }
+    main {
+      max-width: 840px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    section {
+      background: #fff;
+      border: 1px solid #d9e1ec;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 8px;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: #46566f;
+    }
+    input {
+      border: 1px solid #c8d2df;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      background: #172033;
+      color: white;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    .muted {
+      color: #677790;
+      font-size: 13px;
+    }
+    pre {
+      overflow: auto;
+      background: #101828;
+      color: #dce7f7;
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 12px;
+    }
+    #amazon-pay-button {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>Amazon Pay Legacy Widget Test</h1>
+      <p class="muted">This page renders the legacy OffAmazonPayments expressPaymentButton. Login to CardMarket first so the config endpoint can return credentials.</p>
+    </section>
+
+    <section>
+      <form id="config-form" class="grid">
+        <label>
+          Amount
+          <input id="amount" value="1.00" inputmode="decimal">
+        </label>
+        <label>
+          Currency
+          <input id="currency" value="USD" maxlength="3">
+        </label>
+        <label>
+          Note
+          <input id="note" value="">
+        </label>
+        <button type="submit">Render Amazon Pay Button</button>
+      </form>
+    </section>
+
+    <section>
+      <div id="amazon-pay-button"></div>
+      <p id="status" class="muted">Waiting for config.</p>
+    </section>
+
+    <section>
+      <pre id="debug">{}</pre>
+    </section>
+  </main>
+
+  <script>
+    function setStatus(message) {
+      document.getElementById('status').textContent = message;
+    }
+
+    function renderDebug(value) {
+      document.getElementById('debug').textContent = JSON.stringify(value, null, 2);
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) {
+          resolve();
+          return;
+        }
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    function createWidget(config) {
+      const container = document.getElementById('amazon-pay-button');
+      container.innerHTML = '';
+      const widget = document.createElement('div');
+      widget.setAttribute('data-ap-widget-type', config.widgetType);
+      widget.setAttribute('data-ap-signature', config.signature);
+      widget.setAttribute('data-ap-seller-id', config.sellerId);
+      widget.setAttribute('data-ap-access-key', config.accessKey);
+      widget.setAttribute('data-ap-lwa-client-id', config.lwaClientId);
+      widget.setAttribute('data-ap-return-url', config.returnUrl);
+      widget.setAttribute('data-ap-cancel-return-url', config.cancelReturnUrl);
+      widget.setAttribute('data-ap-currency-code', config.currencyCode);
+      widget.setAttribute('data-ap-amount', config.amount);
+      widget.setAttribute('data-ap-note', config.note || '');
+      widget.setAttribute('data-ap-shipping-address-required', config.shippingAddressRequired);
+      widget.setAttribute('data-ap-payment-action', config.paymentAction);
+      container.appendChild(widget);
+    }
+
+    async function renderButton(event) {
+      event?.preventDefault();
+      setStatus('Loading Amazon Pay widget config...');
+      const params = new URLSearchParams({
+        amount: document.getElementById('amount').value || '1.00',
+        currency: document.getElementById('currency').value || 'USD',
+        note: document.getElementById('note').value || ''
+      });
+      const response = await fetch(`/api/providers/amazonpay/legacy-widget-config?${params.toString()}`, {
+        credentials: 'include'
+      });
+      const payload = await response.json();
+      renderDebug(payload);
+      if (!response.ok) {
+        setStatus(payload.responseMessage || payload.message || payload.error || 'Failed to load config.');
+        return;
+      }
+      createWidget(payload);
+      await loadScript(payload.scriptUrl);
+      setStatus('Amazon Pay script loaded. If credentials/signature are valid, the button should render above.');
+    }
+
+    document.getElementById('config-form').addEventListener('submit', renderButton);
+    renderButton().catch((error) => {
+      setStatus(error.message);
+      renderDebug({ error: error.message });
+    });
+  </script>
+</body>
+</html>

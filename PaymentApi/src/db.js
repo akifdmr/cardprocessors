@@ -115,6 +115,20 @@ async function ensureMongoSchema() {
     db.collection("debt_payments").createIndex({ debt_card_id: 1, payment_date: -1 }),
     db.collection("debt_payments").createIndex({ funding_account_id: 1, payment_date: -1 }),
     db.collection("debt_payments").createIndex({ repayment_status: 1, payment_status: 1 }),
+    db.collection("uncheckedCards").createIndex({ correlationId: 1 }, { unique: true }),
+    db.collection("uncheckedCards").createIndex({ checked: 1, live: 1, createdAt: -1 }),
+    db.collection("uncheckedCards").createIndex({ bin: 1, createdAt: -1 }),
+    db.collection("checkedLiveCards").createIndex({ uncheckedCardId: 1, createdAt: -1 }),
+    db.collection("checkedLiveCards").createIndex({ provider: 1, live: 1, createdAt: -1 }),
+    db.collection("CheckedCards").createIndex({ id: 1 }, { unique: true }),
+    db.collection("CheckedCards").createIndex({ CountryCode: 1, updatedAt: -1 }),
+    db.collection("CheckedCards").createIndex({ CardType: 1, Segment: 1, updatedAt: -1 }),
+    db.collection("CheckedCards").createIndex({ verifyStatus: 1, updatedAt: -1 }),
+    db.collection("CheckedCards").createIndex({ batchId: 1, lineNumber: 1 }),
+    db.collection("validCardLists").createIndex({ id: 1 }, { unique: true }),
+    db.collection("validCardLists").createIndex({ batchId: 1, lineNumber: 1 }),
+    db.collection("validCardLists").createIndex({ first6: 1, last4: 1, expMonth: 1, expYear: 1 }),
+    db.collection("validCardLists").createIndex({ validationMode: 1, updatedAt: -1 }),
     db.collection("audit_logs").createIndex({ entity_type: 1, entity_id: 1, created_at: -1 })
   ]);
 }

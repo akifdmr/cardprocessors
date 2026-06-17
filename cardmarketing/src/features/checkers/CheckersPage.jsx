@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ResultCard } from '../../components/common/Details'
 import { CardInput } from '../../components/forms/CardInput'
-import { moneyValue, operationResponseMessage } from '../../utils/format'
+import { formatMoneyInput, moneyValue, operationResponseMessage } from '../../utils/format'
 import { CardIntelligence } from './CardIntelligence'
 import { PerfectGeneratorPanel } from './PerfectGeneratorPage'
 
@@ -12,6 +12,12 @@ const tabs = [
   ['live', 'Card Live Check'],
   ['balance', 'Balance Check'],
   ['learning', 'Machine Learning / Card Üretim'],
+]
+
+const liveProviders = [
+  { value: 'clover', label: 'Clover' },
+  { value: 'paypal', label: 'PayPal' },
+  { value: 'amazonpay', label: 'Amazon Pay' },
 ]
 
 function firstSixFromCard(card = {}) {
@@ -28,10 +34,44 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function compactPayload(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+}
+
+function amazonCheckoutUrl(result = {}) {
+  return result.webCheckoutDetails?.amazonPayRedirectUrl ||
+    result.result?.webCheckoutDetails?.amazonPayRedirectUrl ||
+    result.providerResponse?.webCheckoutDetails?.amazonPayRedirectUrl ||
+    result.result?.providerResponse?.webCheckoutDetails?.amazonPayRedirectUrl ||
+    ''
+}
+
+function amazonCheckoutSessionId(result = {}) {
+  return result.checkoutSessionId ||
+    result.result?.checkoutSessionId ||
+    result.providerResponse?.checkoutSessionId ||
+    result.result?.providerResponse?.checkoutSessionId ||
+    ''
+}
+
+function amazonChargePermissionId(result = {}) {
+  return result.chargePermissionId ||
+    result.result?.chargePermissionId ||
+    result.providerResponse?.chargePermissionId ||
+    result.result?.providerResponse?.chargePermissionId ||
+    ''
+}
+
 function numericDelay(value) {
   const delay = Number(String(value || '').replace(/[^\d.]/g, ''))
   if (!Number.isFinite(delay) || delay < 0) return 0
   return Math.min(Math.round(delay), 60000)
+}
+
+function numericConcurrency(value) {
+  const concurrency = Number(String(value || '').replace(/\D/g, ''))
+  if (!Number.isFinite(concurrency) || concurrency < 1) return 3
+  return Math.min(concurrency, 10)
 }
 
 function offlineBinNetwork(bin) {
@@ -236,17 +276,87 @@ function formatBulkLiveLines(row, live, bin, error) {
   ]
 }
 
+function liveOperationsFor(provider) {
+  if (provider === 'clover') {
+    return [
+      { value: 'verification', label: 'Clover Verify', amount: false },
+      { value: 'live', label: 'Clover Live / Preauth', amount: true },
+      { value: 'auth', label: 'Clover Auth / Preauth', amount: true },
+    ]
+  }
+  if (provider === 'amazonpay') {
+    return [
+      { value: 'verification', label: 'Charge Permission Status', amount: false },
+      { value: 'auth', label: 'Authorize $0.20', amount: true },
+      { value: 'sale', label: 'Sale / Capture Now', amount: true },
+    ]
+  }
+  if (provider === 'paypal') {
+    return [
+      { value: 'live', label: 'PayPal Live Check', amount: true },
+      { value: 'auth', label: 'PayPal Auth', amount: true },
+      { value: 'sale', label: 'PayPal Sale', amount: true },
+    ]
+  }
+  return [
+    { value: 'verification', label: 'Verify', amount: false },
+    { value: 'live', label: 'Live / Auth', amount: true },
+  ]
+}
+
+function selectedLiveOperation(provider, current) {
+  const operations = liveOperationsFor(provider)
+  return operations.find((item) => item.value === current) || operations[0]
+}
+
+function AmazonPayCheckerFlow({ flow, onPatch, onComplete, onCancel, submitting }) {
+  if (!flow) return null
+  const checkoutUrl = flow.checkoutUrl || amazonCheckoutUrl(flow.checkoutResponse)
+  const checkoutSessionId = flow.checkoutSessionId || amazonCheckoutSessionId(flow.checkoutResponse)
+  const targetLabel = flow.targetOperationLabel || flow.targetOperation || 'Amazon Pay'
+
+  return (
+    <article className="card result">
+      <div className="result-head">
+        <strong>Amazon Pay Approval</strong>
+        <span className="pill warn">pending</span>
+      </div>
+      <div className="summary">
+        <div><span>Step 1</span><strong>Checkout session created</strong></div>
+        <div><span>Step 2</span><strong>After Amazon approval, run {targetLabel}</strong></div>
+        <div><span>Checkout Session</span><strong>{checkoutSessionId || '-'}</strong></div>
+      </div>
+      {checkoutUrl ? (
+        <div className="processor-actions">
+          <a className="primary small" href={checkoutUrl} target="_blank" rel="noreferrer">Amazon onayını aç</a>
+          <button className="ghost small" type="button" onClick={onCancel}>Kapat</button>
+        </div>
+      ) : null}
+      <form className="form-grid" onSubmit={(event) => {
+        event.preventDefault()
+        onComplete()
+      }}>
+        <label className="full">
+          <span>Checkout Session ID</span>
+          <input value={checkoutSessionId} onChange={(event) => onPatch({ checkoutSessionId: event.target.value })} />
+        </label>
+        <label className="full">
+          <span>Charge Permission ID</span>
+          <input value={flow.chargePermissionId || ''} onChange={(event) => onPatch({ chargePermissionId: event.target.value })} />
+        </label>
+        <button className="primary full" type="submit" disabled={submitting}>Complete + {targetLabel} çalıştır</button>
+      </form>
+    </article>
+  )
+}
+
 export function CheckersPage({ cards, onRefreshCards, runAction }) {
   const [tab, setTab] = useState('ip')
-  const [form, setForm] = useState({ amount: '0.00', quantity: '10', maxAttempts: '30', billingZip: '00000', liveMode: 'single', bulkDelayMs: '1000' })
+  const [form, setForm] = useState({ provider: 'clover', amount: '0.20', currency: 'USD', quantity: '10', maxAttempts: '30', billingZip: '00000', liveMode: 'single', bulkDelayMs: '0', bulkConcurrency: '3', liveOperation: 'verification' })
   const [result, setResult] = useState(null)
-  const [catalog, setCatalog] = useState(null)
+  const [amazonFlow, setAmazonFlow] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
-
-  useEffect(() => {
-    api('/provider-operations/catalog').then(setCatalog).catch(console.error)
-  }, [])
 
   function withSavedCard(payload) {
     const card = cards.find((item) => item.id === payload.cardId)
@@ -283,8 +393,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     }
   }
 
-  async function runLiveWithBin(payload, provider) {
-    const operation = 'verification'
+  async function runLiveWithBin(payload, provider, operation = 'live') {
     const liveResp = await api('/checkers/live-checker', {
       method: 'POST',
       body: JSON.stringify({ ...payload, provider, operation })
@@ -317,7 +426,103 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     return { live: liveResp, bin }
   }
 
-  async function runBulkLive(provider, onProgress) {
+  async function startAmazonPayFlow(payload, operation) {
+    const checkoutPayload = compactPayload({
+      ...payload,
+      operation: 'checkout_session',
+      paymentIntent: operation === 'sale' || operation === 'charge' ? 'AuthorizeWithCapture' : 'Authorize',
+    })
+    delete checkoutPayload.chargePermissionId
+    delete checkoutPayload.providerPaymentToken
+    delete checkoutPayload.source
+    delete checkoutPayload.token
+
+    const checkoutResponse = await api('/checkers/live-checker', {
+      method: 'POST',
+      body: JSON.stringify({ ...checkoutPayload, provider: 'amazonpay', operation: 'checkout_session' }),
+    })
+    const operationMeta = selectedLiveOperation('amazonpay', operation)
+    setAmazonFlow({
+      targetOperation: operation,
+      targetOperationLabel: operationMeta.label,
+      originalPayload: payload,
+      checkoutResponse,
+      checkoutSessionId: amazonCheckoutSessionId(checkoutResponse),
+      checkoutUrl: amazonCheckoutUrl(checkoutResponse),
+      chargePermissionId: amazonChargePermissionId(checkoutResponse),
+    })
+    setResult({
+      type: 'simple',
+      title: 'Amazon Pay Checkout Session',
+      data: checkoutResponse,
+    })
+  }
+
+  async function completeAmazonPayFlow() {
+    if (!amazonFlow || submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    const withLoader = runAction || ((task) => task())
+    try {
+      await withLoader(async () => {
+        let chargePermissionId = amazonFlow.chargePermissionId
+        let completeResponse = null
+        const checkoutSessionId = amazonFlow.checkoutSessionId || amazonCheckoutSessionId(amazonFlow.checkoutResponse)
+        if (!chargePermissionId && checkoutSessionId) {
+          completeResponse = await api('/checkers/live-checker', {
+            method: 'POST',
+            body: JSON.stringify(compactPayload({
+              ...amazonFlow.originalPayload,
+              provider: 'amazonpay',
+              operation: 'complete_checkout_session',
+              checkoutSessionId,
+            })),
+          })
+          chargePermissionId = amazonChargePermissionId(completeResponse)
+        }
+
+        if (!chargePermissionId) {
+          setResult({
+            type: 'simple',
+            title: 'Amazon Pay Flow Error',
+            data: {
+              status: 'failed',
+              provider: 'amazonpay',
+              operation: amazonFlow.targetOperation,
+              responseMessage: 'Amazon Pay chargePermissionId bulunamadı. Amazon onayı tamamlandıktan sonra Charge Permission ID alanına değeri girip tekrar deneyin.',
+            },
+          })
+          return
+        }
+
+        const finalPayload = compactPayload({
+          ...amazonFlow.originalPayload,
+          provider: 'amazonpay',
+          chargePermissionId,
+        })
+        const { live } = await runLiveWithBin(finalPayload, 'amazonpay', amazonFlow.targetOperation)
+        setAmazonFlow({
+          ...amazonFlow,
+          chargePermissionId,
+          completeResponse,
+          finalResponse: live,
+        })
+        setResult({ type: 'simple', title: 'Amazon Pay Live Check', data: live })
+        await onRefreshCards()
+      }, { label: 'Amazon Pay approval flow çalışıyor', variant: 'auth', detail: 'Checkout complete ediliyor ve hedef canlı işlem gönderiliyor' })
+    } catch (error) {
+      setResult({
+        type: 'simple',
+        title: 'Amazon Pay Flow Error',
+        data: error.data || { status: 'failed', responseMessage: error.message, statusCode: error.status },
+      })
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
+
+  async function runBulkLive(provider, operation, onProgress) {
     const rows = String(form.bulkLive || '')
       .split(/\r?\n/)
       .map((line, index) => parseBulkLiveLine(line, index + 1, form.billingZip || '00000'))
@@ -327,12 +532,19 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
       throw new Error('Toplu live check için en az bir kart satırı gir.')
     }
 
-    const results = []
+    const results = Array(rows.length).fill(null)
     const delayMs = numericDelay(form.bulkDelayMs)
-    for (const [rowIndex, row] of rows.entries()) {
+    const concurrency = numericConcurrency(form.bulkConcurrency)
+    let cursor = 0
+
+    async function worker() {
+      while (cursor < rows.length) {
+        const rowIndex = cursor
+        cursor += 1
+        const row = rows[rowIndex]
       if (row.error) {
-        results.push({ row, lines: formatBulkLiveLines(row, null, null, row.error), status: 'failed' })
-        onProgress?.(results)
+        results[rowIndex] = { row, lines: formatBulkLiveLines(row, null, null, row.error), status: 'failed' }
+        onProgress?.(results.filter(Boolean))
         continue
       }
 
@@ -343,18 +555,20 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
           amount: 1,
           currency: form.currency || 'USD',
         }
-        const { live, bin } = await runLiveWithBin(payload, provider)
-        results.push({ row, live, bin, lines: formatBulkLiveLines(row, live, bin), status: liveStatusLabel(live) })
+        const { live, bin } = await runLiveWithBin(payload, provider, operation)
+        results[rowIndex] = { row, live, bin, lines: formatBulkLiveLines(row, live, bin), status: liveStatusLabel(live) }
       } catch (error) {
-        results.push({ row, lines: formatBulkLiveLines(row, null, null, error.message), status: 'failed' })
+        results[rowIndex] = { row, lines: formatBulkLiveLines(row, null, null, error.message), status: 'failed' }
       }
-      onProgress?.(results)
-      if (delayMs > 0 && rowIndex < rows.length - 1) {
+        onProgress?.(results.filter(Boolean))
+        if (delayMs > 0 && cursor < rows.length) {
         await sleep(delayMs)
       }
     }
+    }
 
-    return results
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, () => worker()))
+    return results.filter(Boolean)
   }
 
   async function submit(event) {
@@ -378,9 +592,14 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
           return
         }
         if (tab === 'live') {
-          const selectedProvider = form.provider || 'paypal'
+          const selectedProvider = form.provider || 'clover'
+            const operationMeta = selectedLiveOperation(selectedProvider, form.liveOperation)
+            const liveOperation = operationMeta.value
 
-          if (form.liveMode === 'bulk') {
+            if (form.liveMode === 'bulk') {
+            if (selectedProvider === 'amazonpay') {
+              throw new Error('Amazon Pay bulk live check için her satırda buyer-approved chargePermissionId gerekir. Bu ekran bulk kart girdisini Clover/PayPal için çalıştırır.')
+            }
             const applyBulkResult = (bulkResults) => setResult({
               type: 'bulkLive',
               title: 'Bulk Live Check Result',
@@ -389,7 +608,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
               status: bulkResults.some((item) => item.status === 'ACTIVE') ? 'passed' : 'failed',
               pending: true,
             })
-            const bulkResults = await runBulkLive(selectedProvider, applyBulkResult)
+            const bulkResults = await runBulkLive(selectedProvider, liveOperation, applyBulkResult)
             setResult({
               type: 'bulkLive',
               title: 'Bulk Live Check Result',
@@ -402,32 +621,40 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
             return
           }
 
-          const payload = withSavedCard({ ...form, billingZip: form.billingZip || '00000', zip: form.billingZip || form.zip || '00000', amount: Number(moneyValue(form.amount || '1.00')) || 1 })
+          const isAmazonPay = selectedProvider === 'amazonpay'
+          const defaultLiveAmount = isAmazonPay ? 0.2 : 1
+          const payload = isAmazonPay
+            ? compactPayload({ ...form, amount: operationMeta.amount ? Number(moneyValue(form.amount || '0.20')) || defaultLiveAmount : undefined, currency: form.currency || 'USD' })
+            : withSavedCard(compactPayload({ ...form, provider: selectedProvider, billingZip: form.billingZip || '00000', zip: form.billingZip || form.zip || '00000', amount: operationMeta.amount ? Number(moneyValue(form.amount || '1.00')) || defaultLiveAmount : undefined }))
           const provider = payload.provider || selectedProvider
-          const { live: liveResp, bin } = await runLiveWithBin(payload, provider)
-          setResult({ type: 'live', live: liveResp, bin })
+          if (isAmazonPay && !payload.chargePermissionId && !payload.source && !payload.providerPaymentToken && !payload.token) {
+            await startAmazonPayFlow(payload, liveOperation)
+            return
+          }
+          const { live: liveResp, bin } = await runLiveWithBin(payload, provider, liveOperation)
+          setAmazonFlow(null)
+          setResult(isAmazonPay ? { type: 'simple', title: 'Amazon Pay Live Check', data: liveResp } : { type: 'live', live: liveResp, bin })
           await onRefreshCards()
           return
         }
         if (tab === 'balance') {
-          const payload = withSavedCard({
+          const payload = compactPayload({
             ...form,
+            provider: 'amazonpay',
             amount: form.amount ? Number(moneyValue(form.amount)) : undefined,
-            balanceAmount: form.balanceAmount ? Number(moneyValue(form.balanceAmount)) : undefined,
+            currency: form.currency || 'USD',
           })
-          const provider = payload.provider || form.provider || 'manual'
-          
-          let balanceRequest
-          if (provider === 'manual') {
-            balanceRequest = api('/checkers/balance', { method: 'POST', body: JSON.stringify(payload) })
-          } else {
-            balanceRequest = api('/provider-operations/cards', { 
-              method: 'POST', 
-              body: JSON.stringify({ ...payload, provider, operation: 'balance' }) 
-            })
+          if (!payload.chargePermissionId && !payload.source && !payload.providerPaymentToken && !payload.token) {
+            await startAmazonPayFlow(payload, 'verification')
+            return
           }
 
-          setResult({ type: 'simple', title: 'Balance Check', data: await balanceRequest })
+          const balanceRequest = api('/checkers/live-checker', {
+            method: 'POST',
+            body: JSON.stringify({ ...payload, provider: 'amazonpay', operation: 'verification' }),
+          })
+
+          setResult({ type: 'simple', title: 'Amazon Pay Balance Check', data: await balanceRequest })
           await onRefreshCards()
           return
         }
@@ -448,6 +675,9 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
       setSubmitting(false)
     }
   }
+
+  const currentLiveProvider = form.provider || 'clover'
+  const currentLiveOperation = selectedLiveOperation(currentLiveProvider, form.liveOperation)
 
   const resultView = (
     <>
@@ -498,87 +728,105 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
           {tab === 'bin' ? <CardInput value={form} onChange={setForm} cards={cards} binOnly /> : null}
           {tab === 'live' ? (
             <>
-              <label className="full">
+              <label>
                 <span>Provider</span>
-        <select value={form.provider || 'paypal'} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
-          <option value="paypal">PayPal</option>
-          {catalog ? Object.values(catalog)
-            .filter((p) => {
-              if (p.key === 'paypal') return false;
-              if (!p.configured) return false;
-              return p.methods?.some(m => ['verification', 'verify', 'live', 'auth', 'authorize'].includes(m.operation));
-            })
-            .map((p) => (
-              <option key={p.key} value={p.key}>{p.label}</option>
-                    )) : (
-                      <>
-                        <option value="clover">Clover</option>
-                        <option value="fluidpay">FluidPay</option>
-                        <option value="globalpayments">Global Payments</option>
-                        <option value="propelrpay">PropelrPay</option>
-                        <option value="quiklie">Quiklie Payment</option>
-                        <option value="braintree">Braintree</option>
-                      </>
-                  )}
+                <select value={currentLiveProvider} onChange={(event) => {
+                  const provider = event.target.value
+                  const operation = selectedLiveOperation(provider, form.liveOperation)
+                  setAmazonFlow(null)
+                  setForm({
+                    ...form,
+                    provider,
+                    liveMode: provider === 'amazonpay' ? 'single' : form.liveMode,
+                    liveOperation: operation.value,
+                    amount: operation.amount ? (form.amount || (provider === 'amazonpay' ? '0.20' : '1.00')) : form.amount,
+                  })
+                }}>
+                  {liveProviders.map((provider) => (
+                    <option key={provider.value} value={provider.value}>{provider.label}</option>
+                  ))}
                 </select>
               </label>
-              <div className="segmented full" role="tablist" aria-label="Live check input mode">
-                <button type="button" className={form.liveMode !== 'bulk' ? 'active' : ''} onClick={() => setForm({ ...form, liveMode: 'single' })}>Tekli</button>
-                <button type="button" className={form.liveMode === 'bulk' ? 'active' : ''} onClick={() => setForm({ ...form, liveMode: 'bulk' })}>Çoklu</button>
-              </div>
-              {form.liveMode === 'bulk' ? (
+              <label>
+                <span>Operation</span>
+                <select value={currentLiveOperation.value} onChange={(event) => {
+                  const operation = selectedLiveOperation(currentLiveProvider, event.target.value)
+                  setAmazonFlow(null)
+                  setForm({ ...form, liveOperation: operation.value, amount: operation.amount ? (form.amount || (currentLiveProvider === 'amazonpay' ? '0.20' : '1.00')) : form.amount })
+                }}>
+                  {liveOperationsFor(currentLiveProvider).map((operation) => (
+                    <option key={operation.value} value={operation.value}>{operation.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Mode</span>
+                <select value={form.liveMode || 'single'} onChange={(event) => setForm({ ...form, liveMode: event.target.value })} disabled={currentLiveProvider === 'amazonpay'}>
+                  <option value="single">Tekli</option>
+                  <option value="bulk">Çoklu paralel</option>
+                </select>
+              </label>
+              {currentLiveOperation.amount ? <label>
+                <span>Amount</span>
+                <input value={form.amount || (currentLiveProvider === 'amazonpay' ? '0.20' : '1.00')} inputMode="decimal" onChange={(event) => setForm({ ...form, amount: formatMoneyInput(event.target.value) })} />
+              </label> : null}
+              <label>
+                <span>Currency</span>
+                <input value={form.currency || 'USD'} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase().slice(0, 3) })} />
+              </label>
+              {currentLiveProvider === 'amazonpay' ? (
                 <>
-                  <label>
-                    <span>Sorgu Delay (ms)</span>
-                    <input value={form.bulkDelayMs || ''} inputMode="numeric" onChange={(event) => setForm({ ...form, bulkDelayMs: event.target.value.replace(/\D/g, '').slice(0, 5) })} />
-                  </label>
-                  <label>
-                    <span>Default ZIP</span>
-                    <input value={form.billingZip || '00000'} inputMode="numeric" onChange={(event) => setForm({ ...form, billingZip: event.target.value.replace(/\D/g, '').slice(0, 10) || '00000' })} />
+                  <label className="full">
+                    <span>Charge Permission ID</span>
+                    <input value={form.chargePermissionId || ''} onChange={(event) => setForm({ ...form, chargePermissionId: event.target.value })} />
                   </label>
                   <label className="full">
-                    <span>Çoklu Live Check</span>
-                    <textarea
-                      rows="9"
-                      value={form.bulkLive || ''}
-                      placeholder={'5312378833981055|02/2032|958|00000\n5312378833981055|02/2032|958\n5312378833981055|02|2032|958|00000\n5312378833981055|02|2032|958'}
-                      onChange={(event) => setForm({ ...form, bulkLive: event.target.value })}
-                    />
+                    <span>Reference / Order</span>
+                    <input value={form.reference || ''} onChange={(event) => setForm({ ...form, reference: event.target.value })} />
                   </label>
                 </>
-              ) : (
-                <CardInput value={form} onChange={setForm} cards={cards} savedCard={false} holder={false} address={false} zip />
-              )}
+              ) : null}
+              {currentLiveProvider !== 'amazonpay' && (form.liveMode || 'single') === 'single' ? (
+                <div className="full">
+                  <CardInput value={form} onChange={setForm} cards={cards} />
+                </div>
+              ) : null}
+              {currentLiveProvider !== 'amazonpay' && form.liveMode === 'bulk' ? (
+                <>
+                  <label>
+                    <span>Parallel</span>
+                    <input value={form.bulkConcurrency || '3'} inputMode="numeric" onChange={(event) => setForm({ ...form, bulkConcurrency: event.target.value.replace(/\D/g, '').slice(0, 2) })} />
+                  </label>
+                  <label>
+                    <span>Delay ms</span>
+                    <input value={form.bulkDelayMs || '0'} inputMode="numeric" onChange={(event) => setForm({ ...form, bulkDelayMs: event.target.value.replace(/\D/g, '').slice(0, 5) })} />
+                  </label>
+                  <label className="full">
+                    <span>Bulk Cards</span>
+                    <textarea rows="10" value={form.bulkLive || ''} placeholder="4111111111111111|12|2028|123|10001" onChange={(event) => setForm({ ...form, bulkLive: event.target.value })} />
+                  </label>
+                </>
+              ) : null}
             </>
           ) : null}
           {tab === 'balance' ? (
             <>
               <label className="full">
-                <span>Provider</span>
-        <select value={form.provider || 'manual'} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
-          <option value="manual">Manual Record (No API)</option>
-          {catalog ? Object.values(catalog)
-            .filter((p) => {
-              if (!p.configured) return false;
-              return p.methods?.some(m => ['auth', 'authorize'].includes(m.operation));
-            })
-            .map((p) => (
-              <option key={p.key} value={p.key}>{p.label}</option>
-                    )) : (
-                      <>
-                        <option value="clover">Clover</option>
-                        <option value="paypal">PayPal</option>
-                        <option value="fluidpay">FluidPay</option>
-                        <option value="globalpayments">Global Payments</option>
-                        <option value="propelrpay">PropelrPay</option>
-                        <option value="quiklie">Quiklie Payment</option>
-                        <option value="braintree">Braintree</option>
-                      </>
-                  )}
-                </select>
+                <span>Charge Permission ID</span>
+                <input value={form.chargePermissionId || ''} onChange={(event) => setForm({ ...form, provider: 'amazonpay', chargePermissionId: event.target.value })} />
               </label>
-              <CardInput value={form} onChange={setForm} cards={cards} cvv={false} amount />
-              <label><span>Balance Amount</span><input value={form.balanceAmount || ''} onChange={(event) => setForm({ ...form, balanceAmount: event.target.value })} /></label>
+              <label>
+                <span>Amount</span>
+                <input value={form.amount || '0.20'} inputMode="decimal" onChange={(event) => setForm({ ...form, provider: 'amazonpay', amount: formatMoneyInput(event.target.value) })} />
+              </label>
+              <label>
+                <span>Currency</span>
+                <input value={form.currency || 'USD'} onChange={(event) => setForm({ ...form, provider: 'amazonpay', currency: event.target.value.toUpperCase().slice(0, 3) })} />
+              </label>
+              <label className="full">
+                <span>Reference / Order</span>
+                <input value={form.reference || ''} onChange={(event) => setForm({ ...form, provider: 'amazonpay', reference: event.target.value })} />
+              </label>
             </>
           ) : null}
             <button className="primary full" type="submit" disabled={submitting}>
@@ -588,6 +836,13 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
         </div>
         {tab === 'live' ? (
           <div className="checker-result-column">
+            <AmazonPayCheckerFlow
+              flow={amazonFlow}
+              onPatch={(patch) => setAmazonFlow((current) => current ? { ...current, ...patch } : current)}
+              onComplete={completeAmazonPayFlow}
+              onCancel={() => setAmazonFlow(null)}
+              submitting={submitting}
+            />
             {result ? resultView : (
               <article className="card result checker-empty-result">
                 <div className="result-head">
@@ -595,9 +850,9 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
                   <span className="pill warn">ready</span>
                 </div>
                 <div className="summary">
-                  <div><span>Provider</span><strong>{form.provider || 'paypal'}</strong></div>
-                  <div><span>Operation</span><strong>live-checker / verification + bin</strong></div>
-                  <div><span>BIN Check</span><strong>enabled</strong></div>
+                  <div><span>Provider</span><strong>{currentLiveProvider}</strong></div>
+                  <div><span>Operation</span><strong>{currentLiveOperation.label}</strong></div>
+                  <div><span>BIN Check</span><strong>skipped</strong></div>
                   <div><span>Result</span><strong>-</strong></div>
                 </div>
               </article>
