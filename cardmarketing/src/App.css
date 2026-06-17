@@ -262,6 +262,68 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
   gap: 12px;
   margin-top: 14px;
 }
+.block {
+  display: block;
+  margin-top: 4px;
+}
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: #d8eadf;
+}
+.inline-check input {
+  width: auto;
+  flex: 0 0 auto;
+}
+.user-summary {
+  margin-top: 14px;
+}
+.user-create-form {
+  align-items: end;
+}
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.role-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(152, 176, 164, 0.14);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.role-card h4 {
+  text-transform: uppercase;
+}
+.role-card span {
+  color: #b8c9c0;
+  font-size: 13px;
+}
+.user-management-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.user-management-table th,
+.user-management-table td {
+  white-space: nowrap;
+}
+.user-management-table input,
+.user-management-table select {
+  min-width: 150px;
+}
+.user-password-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.user-password-cell input {
+  min-width: 170px;
+}
 .service-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

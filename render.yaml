@@ -18,7 +18,15 @@ services:
         value: "true"
       - key: DATABASE_URL
         sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_CONNECTIONSTRING
+        sync: false
       - key: MONGODB_DATABASE
+        sync: false
+      - key: MONGODB_USERNAME
+        sync: false
+      - key: MONGODB_PASSWORD
         sync: false
       - key: APP_ENCRYPTION_KEY_BASE64
         sync: false

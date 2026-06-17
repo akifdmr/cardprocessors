@@ -11,6 +11,7 @@ import { UncheckedCardsPage } from './features/unchecked/UncheckedCardsPage'
 import { PaymentProcessorsPage } from './features/processors/PaymentProcessorsPage'
 import { DebtManagementPage } from './features/debt/DebtManagementPage'
 import { ServicesPage } from './features/services/ServicesPage'
+import { UserManagementPage } from './features/users/UserManagementPage'
 // Yeni sayfalar
 import { PerfectGeneratorPage } from './features/checkers/PerfectGeneratorPage'
 import { OllamaChatPage } from './features/ollamaChat/OllamaChatPage'
@@ -121,6 +122,7 @@ export default function App() {
         {route === 'debt-management' && <DebtManagementPage runAction={run} />}
         {route === 'cards' && <CardsPage cards={cards} onRefreshCards={refreshCards} runAction={run} />}
         {route === 'services' && <ServicesPage runAction={run} />}
+        {route === 'user-management' && user.permissions?.canManageUsers && <UserManagementPage user={user} runAction={run} />}
         {route === 'perfect-generator' && <PerfectGeneratorPage runAction={run} />}
         {route === 'ollama-chat' && <OllamaChatPage runAction={run} />}
       </AppShell>

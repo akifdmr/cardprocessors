@@ -7920,13 +7920,20 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     canViewBalance = false,
     isActive = true
   } = req.body;
+  const normalizedUsername = String(username || "").trim();
+  const normalizedRole = String(role || "").trim();
 
-  if (!username || !password || !role) {
+  if (!normalizedUsername || !password || !normalizedRole) {
     return sendApiError(res, req, 400, "username, password and role are required", "VALIDATION_ERROR");
   }
 
-  if (!["admin", "operator", "customer"].includes(role)) {
+  if (!["admin", "operator", "customer"].includes(normalizedRole)) {
     return sendApiError(res, req, 400, "Unsupported role", "UNSUPPORTED_ROLE");
+  }
+
+  const existingUser = await query("select id from users where username = $1", [normalizedUsername]);
+  if (existingUser.rowCount > 0) {
+    return sendApiError(res, req, 409, "Username already exists", "USERNAME_EXISTS");
   }
 
   const result = await query(
@@ -7941,10 +7948,10 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     ) values ($1, $2, $3, $4, $5, $6, $7)
     returning id`,
     [
-      username,
+      normalizedUsername,
       hashPassword(password),
       displayName || null,
-      role,
+      normalizedRole,
       Boolean(canBalanceCheck),
       Boolean(canViewBalance),
       Boolean(isActive)
@@ -7952,6 +7959,76 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
   );
 
   res.status(201).json({ id: result.rows[0].id });
+}));
+
+app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const {
+    displayName,
+    role,
+    canBalanceCheck = false,
+    canViewBalance = false,
+    isActive = true
+  } = req.body;
+
+  if (!["admin", "operator", "customer"].includes(role)) {
+    return sendApiError(res, req, 400, "Unsupported role", "UNSUPPORTED_ROLE");
+  }
+
+  if (userId === req.user.id && !isActive) {
+    return sendApiError(res, req, 400, "Current user cannot disable their own account", "SELF_DISABLE_BLOCKED");
+  }
+
+  if (userId === req.user.id && role !== "admin") {
+    return sendApiError(res, req, 400, "Current admin cannot remove their own admin role", "SELF_ROLE_DOWNGRADE_BLOCKED");
+  }
+
+  const database = await db.getDb();
+  const updateResult = await database.collection("users").updateOne(
+    { id: userId },
+    {
+      $set: {
+        display_name: displayName || null,
+        role,
+        can_balance_check: Boolean(canBalanceCheck),
+        can_view_balance: Boolean(canViewBalance),
+        is_active: Boolean(isActive),
+        updated_at: new Date().toISOString()
+      }
+    }
+  );
+
+  if (updateResult.matchedCount === 0) {
+    return sendApiError(res, req, 404, "User not found", "USER_NOT_FOUND");
+  }
+
+  res.json({ ok: true });
+}));
+
+app.post("/api/users/:userId/password", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const { password } = req.body;
+
+  if (!password || String(password).length < 8) {
+    return sendApiError(res, req, 400, "Password must be at least 8 characters", "VALIDATION_ERROR");
+  }
+
+  const database = await db.getDb();
+  const updateResult = await database.collection("users").updateOne(
+    { id: userId },
+    {
+      $set: {
+        password_hash: hashPassword(password),
+        updated_at: new Date().toISOString()
+      }
+    }
+  );
+
+  if (updateResult.matchedCount === 0) {
+    return sendApiError(res, req, 404, "User not found", "USER_NOT_FOUND");
+  }
+
+  res.json({ ok: true });
 }));
 
 app.get("/api/config/providers", requireAuth, requirePermission("canListCards"), (_req, res) => {

@@ -6,6 +6,7 @@ const routes = [
   ['debt-management', 'Debt Ops'],
   ['cards', 'Cards'],
   ['services', 'Services'],
+  ['user-management', 'Users', 'canManageUsers'],
   ['perfect-generator', 'Perfect Generator'],
   ['ollama-chat', 'AI Chat'],
 ]
@@ -25,7 +26,7 @@ export function AppShell({ user, route, setRoute, onLogout, children }) {
         </div>
       </header>
       <nav className="nav">
-        {routes.map(([key, label]) => (
+        {routes.filter(([, , permission]) => !permission || user.permissions?.[permission]).map(([key, label]) => (
           <button type="button" className={route === key ? 'active' : ''} key={key} onClick={() => setRoute(key)}>{label}</button>
         ))}
       </nav>

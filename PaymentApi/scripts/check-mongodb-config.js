@@ -11,7 +11,7 @@ const env = require("../src/config/env");
 
 const databaseUrl = env.databaseUrl || "";
 if (!databaseUrl.startsWith("mongodb://") && !databaseUrl.startsWith("mongodb+srv://")) {
-  throw new Error("DATABASE_URL must be a MongoDB connection string.");
+  throw new Error("DATABASE_URL, MONGODB_URI or MONGODB_CONNECTIONSTRING must be a MongoDB connection string.");
 }
 
 const authMode = env.mongo.tlsCertificateKeyFile

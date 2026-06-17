@@ -82,8 +82,15 @@ function mongoClientCertificateKeyFile() {
     optionalEnv("MONGODB_SSL_CERT_KEY_FILE");
 }
 
+function getRawDatabaseUrl() {
+  return optionalEnv("DATABASE_URL") ||
+    optionalEnv("MONGODB_URI") ||
+    optionalEnv("MONGODB_CONNECTIONSTRING") ||
+    optionalEnv("MONGO_URL");
+}
+
 function resolveDatabaseUrl() {
-  const rawDatabaseUrl = optionalEnv("DATABASE_URL") || optionalEnv("MONGODB_CONNECTIONSTRING");
+  const rawDatabaseUrl = getRawDatabaseUrl();
   if (!rawDatabaseUrl) {
     return requireEnv("DATABASE_URL");
   }
@@ -121,7 +128,7 @@ module.exports = {
     serverSelectionTimeoutMs: Number(optionalEnv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "10000")),
     tlsCertificateKeyFile: mongoClientCertificateKeyFile(),
     usesDerivedPasswordAuth: (() => {
-      const rawDatabaseUrl = optionalEnv("DATABASE_URL") || optionalEnv("MONGODB_CONNECTIONSTRING") || "";
+      const rawDatabaseUrl = getRawDatabaseUrl() || "";
       return rawDatabaseUrl.includes("MONGODB-X509") && !hasMongoClientCertificateConfig() && Boolean(optionalEnv("MONGODB_USERNAME") && optionalEnv("MONGODB_PASSWORD"));
     })(),
     source: "live"
