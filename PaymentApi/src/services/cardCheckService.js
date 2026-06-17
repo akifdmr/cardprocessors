@@ -62,26 +62,37 @@ function normalizeCardInput(payload = {}) {
 
 function parseCardLine(line) {
   const parts = String(line || "").trim().split("|");
+  const fieldAfterCvv = (index) => {
+    const value = String(parts[index] || "").trim();
+    const isZip = /^\d{5}$/.test(value);
+    return {
+      zip: isZip ? value : "00000",
+      holderName: isZip ? parts[index + 1] : value,
+      address: parts.slice(isZip ? index + 2 : index + 1).join("|")
+    };
+  };
   const month = digitsOnly(parts[1]);
   const year = digitsOnly(parts[2]);
   const cvvAfterYear = String(parts[3] || "").trim();
   if (parts.length >= 4 && /^(0?[1-9]|1[0-2])$/.test(month) && /^(\d{2}|\d{4})$/.test(year) && cvvAfterYear) {
+    const afterCvv = fieldAfterCvv(4);
     return normalizeCardInput({
       cardNumber: parts[0],
       exp: `${month}/${year}`,
       cvv: parts[3],
-      zip: parts[4],
-      holderName: parts[5],
-      address: parts.slice(6).join("|")
+      zip: afterCvv.zip,
+      holderName: afterCvv.holderName,
+      address: afterCvv.address
     });
   }
+  const afterCvv = fieldAfterCvv(3);
   return normalizeCardInput({
     cardNumber: parts[0],
     exp: parts[1],
     cvv: parts[2],
-    zip: parts[3],
-    holderName: parts[4],
-    address: parts.slice(5).join("|")
+    zip: afterCvv.zip,
+    holderName: afterCvv.holderName,
+    address: afterCvv.address
   });
 }
 
@@ -111,7 +122,7 @@ async function binCheckCard(payload = {}) {
 
 async function liveCheckCard(payload = {}) {
   const provider = String(payload.provider || "clover").toLowerCase();
-  const amount = Number(payload.amount || 1);
+  const amount = Number(payload.amount || 0.1);
   const currency = payload.currency || "usd";
 
   if (provider === "amazonpay") {
@@ -179,9 +190,21 @@ async function liveCheckCard(payload = {}) {
 }
 
 async function checkCard(payload = {}) {
-  
   const binCheck = await binCheckCard(payload);
-  const live = await liveCheckCard(payload);
+  let live;
+  try {
+    live = await liveCheckCard(payload);
+  } catch (error) {
+    live = {
+      status: "failed",
+      resultCode: error.resultCode || error.code || "LIVE_CHECK_FAILED",
+      responseMessage: error.message,
+      error: error.message,
+      provider: String(payload.provider || "clover").toLowerCase(),
+      operation: "live",
+      isLive: false
+    };
+  }
   return {
     status: liveCheckerService.isLiveResponse(live) ? "passed" : "review",
     live,

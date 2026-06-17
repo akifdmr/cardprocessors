@@ -1307,7 +1307,8 @@ function buildCardLogSnapshot(payload = {}) {
   return {
     mode: getSavedCardId(payload.cardId) ? "saved" : "manual",
     cardId: getSavedCardId(payload.cardId),
-    maskedPan: details.normalizedPan ? `**** **** **** ${details.normalizedPan.slice(-4)}` : (details.last4 ? `**** **** **** ${details.last4}` : null),
+    maskedPan: details.normalizedPan,
+    // maskedPan: details.normalizedPan ? `**** **** **** ${details.normalizedPan.slice(-4)}` : (details.last4 ? `**** **** **** ${details.last4}` : null),
     first6: details.first6,
     last4: details.last4,
     brand: details.brand,
@@ -5413,6 +5414,8 @@ function uncheckedCardPublicFields(card = {}) {
     binCheckError: card.binCheckError || null,
     checked: Boolean(card.checked),
     live: Boolean(card.live),
+    operatorStatus: card.operatorStatus || card.lastCheck?.operatorStatus || null,
+    operatorMessage: card.operatorMessage || card.lastCheck?.operatorMessage || null,
     balance: card.balance || null,
     provider: card.provider || null,
     providerReferenceId: card.providerReferenceId || null,
@@ -5442,6 +5445,59 @@ function uncheckedCardCheckPayload(card = {}, body = {}) {
 
 function checkedStateFromServiceResult(result = {}) {
   return liveCheckerService.isLiveResponse(result.live || result);
+}
+
+function serviceResultText(result = {}) {
+  return [
+    result.operatorMessage,
+    result.live?.responseMessage,
+    result.live?.failureReason,
+    result.live?.error,
+    result.live?.message,
+    result.live?.result?.responseMessage,
+    result.live?.result?.message,
+    result.live?.providerResponse?.responseMessage,
+    result.live?.providerResponse?.message,
+    result.binCheck?.error,
+    result.binCheck?.fallbackError,
+    result.binCheck?.providerWarning,
+    result.error,
+    result.message
+  ].filter(Boolean).join(" ").trim();
+}
+
+function uncheckedOperatorResult({ live = false, result = {}, error = null } = {}) {
+  const text = serviceResultText(error ? { error: error.message, live: error.data || {} } : result).toLowerCase();
+  const missingInfo = [
+    "required",
+    "missing",
+    "invalid",
+    "token_required",
+    "requires",
+    "credential",
+    "not configured",
+    "exp must",
+    "must be"
+  ].some((needle) => text.includes(needle));
+
+  if (live) {
+    return {
+      operatorStatus: "live",
+      operatorMessage: "LIVE: Kart onay aldı, otomatik CheckedCards tablosuna taşındı."
+    };
+  }
+
+  if (missingInfo) {
+    return {
+      operatorStatus: "not_processed",
+      operatorMessage: "İşlem alınmadı: bilgi veya POS tokeni eksik. Farklı POS cihazında denenebilir."
+    };
+  }
+
+  return {
+    operatorStatus: "close",
+    operatorMessage: "CLOSE: Bu POS cevabına göre kart onay almadı."
+  };
 }
 
 function binPatchFromResult(binCheck = {}) {
@@ -5497,6 +5553,8 @@ function maskOnlyProjection() {
     binCheckError: 1,
     checked: 1,
     live: 1,
+    operatorStatus: 1,
+    operatorMessage: 1,
     balance: 1,
     provider: 1,
     providerReferenceId: 1,
@@ -5877,6 +5935,7 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
   const result = await cardCheckService.checkCard(uncheckedCardCheckPayload(card, body));
   const live = checkedStateFromServiceResult(result);
   const binPatch = binPatchFromResult(result.binCheck);
+  const operatorResult = uncheckedOperatorResult({ live, result });
   const provider = String(body.provider || card.provider || "clover").toLowerCase();
   const providerReferenceId = result.live?.providerReferenceId ||
     result.live?.transactionId ||
@@ -5886,6 +5945,8 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
   const patch = {
     checked: true,
     live,
+    operatorStatus: operatorResult.operatorStatus,
+    operatorMessage: operatorResult.operatorMessage,
     provider,
     providerReferenceId,
     ...binPatch,
@@ -5893,6 +5954,8 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
       provider,
       operation: "live_then_bin",
       httpStatus: 200,
+      operatorStatus: operatorResult.operatorStatus,
+      operatorMessage: operatorResult.operatorMessage,
       response: redactSensitiveReportData(result)
     },
     updatedAt: now
@@ -5944,7 +6007,7 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
           id: checkedId,
           createdAt: now
         },
-        $set: verifiedCard
+        $set: Object.fromEntries(Object.entries(verifiedCard).filter(([key]) => key !== "id"))
       },
       { upsert: true }
     );
@@ -5965,12 +6028,10 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
       {
         $setOnInsert: {
           id: verifiedId,
-          checkedCardId: checkedId,
           createdAt: now
         },
         $set: {
-          ...verifiedCard,
-          id: verifiedId,
+          ...Object.fromEntries(Object.entries(verifiedCard).filter(([key]) => key !== "id")),
           checkedCardId: checkedId
         }
       },
@@ -5982,7 +6043,6 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
       {
         $setOnInsert: {
           id: uuidv4(),
-          uncheckedCardId: card.id,
           createdAt: now
         },
         $set: {
@@ -6013,6 +6073,8 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
     checked: true,
     live,
     provider,
+    operatorStatus: operatorResult.operatorStatus,
+    operatorMessage: operatorResult.operatorMessage,
     providerReferenceId,
     verifiedCardId: live ? `verified:${card.recordHash || card.id}` : null,
     binCheck: result.binCheck,
@@ -6078,12 +6140,12 @@ app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"
 
   const rows = [];
   const errors = [];
+  const autoLiveCheck = req.body.autoLiveCheck !== false && req.body.checkOnCreate !== false;
   for (const [index, raw] of rawCards.entries()) {
     try {
       const normalized = normalizeUncheckedCardLinePayload(raw);
       const recordHash = cardCheckService.recordHash(normalized);
       const update = {
-        id:normalized.pan,
         maskedPan: cardCheckService.maskPan(normalized.pan),
         bin: normalized.pan.slice(0, 6),
         last4: normalized.pan.slice(-4),
@@ -6118,13 +6180,54 @@ app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"
         { upsert: true }
       );
       const saved = await mongo.collection("uncheckedCards").findOne({ recordHash }, { projection: maskOnlyProjection() });
-      rows.push(uncheckedCardPublicFields(saved));
+      let row = uncheckedCardPublicFields(saved);
+      if (autoLiveCheck && req.user?.permissions?.canRunAuthCheck && saved?.panEncrypted) {
+        try {
+          const checkedResult = await runEncryptedUncheckedCardCheck({ mongo, card: saved, body: req.body, userId: req.user?.id || null });
+          const checkedSaved = await mongo.collection("uncheckedCards").findOne({ recordHash }, { projection: maskOnlyProjection() });
+          row = {
+            ...uncheckedCardPublicFields(checkedSaved || saved),
+            liveCheckResult: checkedResult
+          };
+        } catch (checkError) {
+          const operatorResult = uncheckedOperatorResult({ live: false, error: checkError });
+          await mongo.collection("uncheckedCards").updateOne(
+            { id: saved.id },
+            {
+              $set: {
+                checked: true,
+                live: false,
+                operatorStatus: operatorResult.operatorStatus,
+                operatorMessage: operatorResult.operatorMessage,
+                lastCheck: {
+                  provider: req.body.provider || raw.provider || saved.provider || "clover",
+                  operation: "live_then_bin",
+                  httpStatus: checkError.statusCode || 500,
+                  operatorStatus: operatorResult.operatorStatus,
+                  operatorMessage: operatorResult.operatorMessage,
+                  response: redactSensitiveReportData({ message: checkError.message })
+                },
+                updatedAt: now
+              }
+            }
+          );
+          row = {
+            ...row,
+            checked: true,
+            live: false,
+            operatorStatus: operatorResult.operatorStatus,
+            operatorMessage: operatorResult.operatorMessage,
+            liveCheckError: checkError.message
+          };
+        }
+      }
+      rows.push(row);
     } catch (error) {
       errors.push({ index: index + 1, message: error.message });
     }
   }
 
-  res.status(errors.length ? 207 : 201).json({
+  res.status(rows.length ? 201 : 400).json({
     status: errors.length ? "partial" : "created",
     inserted: rows.length,
     errors,
@@ -6151,6 +6254,7 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
   });
   const checked = httpStatus >= 200 && httpStatus < 500 && payload?.resultCode !== "TOKEN_REQUIRED";
   const live = isLiveOperationResponse(payload, httpStatus);
+  const operatorResult = uncheckedOperatorResult({ live, result: payload || {} });
   const now = new Date().toISOString();
   await mongo.collection("uncheckedCards").updateOne(
     { id: card.id },
@@ -6158,12 +6262,16 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
       $set: {
         checked,
         live,
+        operatorStatus: operatorResult.operatorStatus,
+        operatorMessage: operatorResult.operatorMessage,
         provider,
         providerReferenceId: payload?.providerReferenceId || payload?.transactionId || payload?.id || card.providerReferenceId || null,
         lastCheck: {
           provider,
           operation: "live",
           httpStatus,
+          operatorStatus: operatorResult.operatorStatus,
+          operatorMessage: operatorResult.operatorMessage,
           response: redactSensitiveReportData(payload || {})
         },
         updatedAt: now
@@ -6177,7 +6285,6 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
       {
         $setOnInsert: {
           id: uuidv4(),
-          uncheckedCardId: card.id,
           createdAt: now
         },
         $set: {
@@ -6205,7 +6312,9 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
   res.status(httpStatus).json({
     ...payload,
     checked,
-    live
+    live,
+    operatorStatus: operatorResult.operatorStatus,
+    operatorMessage: operatorResult.operatorMessage
   });
 }));
 
@@ -6228,16 +6337,21 @@ app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("can
       results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body, userId: req.user?.id || null }));
     } catch (error) {
       const now = new Date().toISOString();
+      const operatorResult = uncheckedOperatorResult({ live: false, error });
       await mongo.collection("uncheckedCards").updateOne(
         { id: card.id },
         {
           $set: {
             checked: true,
             live: false,
+            operatorStatus: operatorResult.operatorStatus,
+            operatorMessage: operatorResult.operatorMessage,
             lastCheck: {
               provider: req.body.provider || card.provider || "clover",
               operation: "live_then_bin",
               httpStatus: error.statusCode || 500,
+              operatorStatus: operatorResult.operatorStatus,
+              operatorMessage: operatorResult.operatorMessage,
               response: redactSensitiveReportData({ message: error.message })
             },
             updatedAt: now
@@ -6249,6 +6363,7 @@ app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("can
         maskedPan: card.maskedPan,
         checked: true,
         live: false,
+        ...operatorResult,
         error: error.message
       });
     }
@@ -8638,11 +8753,7 @@ app.use((error, req, res, _next) => {
 
 app.get("*", (_req, res) => {
   const reactIndex = path.resolve(process.cwd(), "public", "react", "index.html");
-  res.sendFile(reactIndex, (error) => {
-    if (error) {
-      res.sendFile(path.resolve(process.cwd(), "public", "index.html"));
-    }
-  });
+  res.sendFile(reactIndex);
 });
 
 ensureBootstrapAdmin()

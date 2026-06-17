@@ -96,7 +96,7 @@ function compactResult(row, response = {}) {
     isLive: status === "LIVE",
     provider: response.provider || DEFAULT_PROVIDER,
     operation: response.operation || DEFAULT_OPERATION,
-    maskedPan: row.maskedPan,
+    maskedPan: row.pan,
     resultCode: response.resultCode || result.resultCode || null,
     responseMessage: response.responseMessage || result.responseMessage || response.failureReason || null,
     referenceId: response.referenceId || response.providerReferenceId || result.transactionId || result.cloverChargeId || null,
@@ -105,7 +105,9 @@ function compactResult(row, response = {}) {
     cardType: checkedCard?.CardType || bin.summary?.type || bin.details?.["Card Type"] || null,
     cardLevel: checkedCard?.Segment || bin.summary?.level || bin.details?.["Card Level"] || null,
     bank: checkedCard?.Bank || checkedCard?.bank || bin.summary?.issuer || bin.details?.["Issuer Name / Bank"] || null,
-    checkedCardId: checkedCard?.id || null,
+    checkedCardId: "...",
+    expiryMonth: checkedCard?.expMonth || row.expMonth,
+    expiryYear: checkedCard?.expYear || row.expYear,
     balance: checkedCard?.balanceAmount ?? checkedCard?.balance ?? 0
   };
 }

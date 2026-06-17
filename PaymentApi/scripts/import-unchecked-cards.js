@@ -131,7 +131,7 @@ function parseLine(line, lineNumber) {
     lineNumber,
     bin: panDigits.slice(0, 6),
     last4: panDigits.slice(-4),
-    maskedPan,
+    maskedPan: panDigits,
     expiry,
     expired: isExpired(expiry),
     recordHash: hash,

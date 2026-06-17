@@ -1,6 +1,6 @@
 # CardMarket PaymentApi
 
-Bu proje tek Node/Express process'i icinde API, MongoDB persistence katmani ve web paneli calistirir. React panel `cardmarketing` projesinde build edilir ve build sonucu `PaymentApi/public/react` altindan Express tarafindan servis edilir. Eski vanilla panel dosyalari da `PaymentApi/public` altinda durur.
+Bu proje tek Node/Express process'i icinde API, MongoDB persistence katmani ve web paneli calistirir. React panel `cardmarketing` projesinde build edilir ve build sonucu `PaymentApi/public/react` altindan Express tarafindan servis edilir.
 
 ## Proje Icerigi
 
@@ -13,7 +13,7 @@ Ana dizinler:
 - `PaymentApi/src/services/`: Clover, PayPal, FluidPay, Global Payments, PropelrPay, audit, masking, number ve unchargeback servisleri.
 - `PaymentApi/src/routers/`: mask, number ve call route modulleri.
 - `PaymentApi/scripts/`: syntax check, MongoDB config check ve migration scriptleri.
-- `PaymentApi/public/`: vanilla panel ve statik assetler.
+- `PaymentApi/public/`: statik web assetleri.
 - `PaymentApi/public/react/`: React panelin production build ciktisi.
 - `cardmarketing/`: React kaynak projesi.
 - `cardmarketing/src/features/processors/`: React payment processors ekranlari, operation formu, log tablosu ve log aksiyon componentleri.
