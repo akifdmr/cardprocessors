@@ -1,7 +1,91 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, toQuery } from '../../api/client'
 import { PaginationControls } from '../../components/common/Pagination'
-import { RequestLogPanel } from '../../components/common/RequestLogPanel'
+import { RequestLogPanel, maskLogPayload } from '../../components/common/RequestLogPanel'
+
+// CSS styles
+const styles = `
+  .address-cell {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .address-cell[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    background: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 1000;
+    white-space: normal;
+    max-width: 300px;
+    word-wrap: break-word;
+    margin-top: 4px;
+    margin-left: -10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  .table-wrap table td {
+    position: relative;
+    padding: 8px 10px;
+    font-size: 13px;
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .table-wrap table th {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  /* Address column specific */
+  .table-wrap table td:nth-child(5) {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Truncate other long text columns */
+  .table-wrap table td:nth-child(4) { /* Holder name */
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .table-wrap table td:nth-child(6) { /* Bank */
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Tooltip for all truncated cells */
+  .table-wrap table td[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    background: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 1000;
+    white-space: normal;
+    max-width: 300px;
+    word-wrap: break-word;
+    margin-top: 4px;
+    margin-left: -10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    pointer-events: none;
+  }
+`
 
 const providers = ['clover', 'paypal', 'nmi', 'fluidpay', 'braintree', 'globalpayments', 'propelrpay', 'quiklie', 'zoho']
 
@@ -28,7 +112,7 @@ function StatusPill({ value }) {
 function ResultModal({ value, onClose }) {
   if (!value) return null
   return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
+    <div className="modal-overlay json-modal-overlay" role="presentation" onClick={onClose}>
       <article className="modal panel" role="dialog" aria-modal="true" aria-label="Action result" onClick={(event) => event.stopPropagation()}>
         <div className="section-head">
           <div>
@@ -37,7 +121,7 @@ function ResultModal({ value, onClose }) {
           </div>
           <button className="ghost small" type="button" onClick={onClose}>Kapat</button>
         </div>
-        <pre className="json-modal-pre">{JSON.stringify(value.payload || {}, null, 2)}</pre>
+        <pre className="json-modal-pre">{JSON.stringify(maskLogPayload(value.payload || {}), null, 2)}</pre>
       </article>
     </div>
   )
@@ -228,7 +312,31 @@ function permissionMessage(error) {
   return error.message
 }
 
+// Helper function for truncating text
+function truncateText(text, maxLength = 30) {
+  if (!text) return '-'
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
 export function UncheckedCardsPage({ user, runAction }) {
+  // Inject styles
+  useEffect(() => {
+    const styleId = 'unchecked-cards-styles'
+    if (!document.getElementById(styleId)) {
+      const styleElement = document.createElement('style')
+      styleElement.id = styleId
+      styleElement.textContent = styles
+      document.head.appendChild(styleElement)
+    }
+    return () => {
+      const styleElement = document.getElementById(styleId)
+      if (styleElement) {
+        styleElement.remove()
+      }
+    }
+  }, [])
+
   const [unchecked, setUnchecked] = useState({ rows: [], total: 0, page: 1, pageSize: 25, pageCount: 1 })
   const [checkedLive, setCheckedLive] = useState({ rows: [], total: 0, page: 1, pageSize: 25, pageCount: 1 })
   const [uncheckedPage, setUncheckedPage] = useState(1)
@@ -527,9 +635,9 @@ export function UncheckedCardsPage({ user, runAction }) {
                   <td>{card.maskedPan}</td>
                   <td>{card.exp}</td>
                   <td>{card.zip || '-'}</td>
-                  <td>{card.holderName || '-'}</td>
-                  <td className="wide-cell">{card.address || '-'}</td>
-                  <td>{card.bank || '-'}</td>
+                  <td title={card.holderName || ''}>{truncateText(card.holderName, 20)}</td>
+                  <td className="address-cell" title={card.address || ''}>{truncateText(card.address, 35)}</td>
+                  <td title={card.bank || ''}>{truncateText(card.bank, 15)}</td>
                   <td>{card.cardLevel || '-'}</td>
                   <td>{card.cardType || '-'}</td>
                   <td>{card.countryCode || '-'}</td>
@@ -579,7 +687,7 @@ export function UncheckedCardsPage({ user, runAction }) {
                 <tr key={card.id}>
                   <td>{card.maskedPan}</td>
                   <td>{card.provider || '-'}</td>
-                  <td>{card.providerReferenceId || '-'}</td>
+                  <td title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
                   <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('balance', card)}>Balance</button> : <span className="muted">-</span>}</td>
                   <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('live', card)}>Live</button> : <span className="muted">-</span>}</td>
                   <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>Auth</button> : <span className="muted">-</span>}</td>

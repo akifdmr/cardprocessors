@@ -30,6 +30,13 @@ h1, h2, h3, h4, p { margin: 0; }
 .wide { width: 100%; }
 .page-stack { display: grid; gap: 18px; }
 .checker-standard { display: block; }
+.checker-standard-result-grid,
+.unchecked-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  gap: 18px;
+  align-items: start;
+}
 .checker-live-grid {
   display: grid;
   grid-template-columns: minmax(360px, 0.82fr) minmax(420px, 1.18fr);
@@ -45,6 +52,19 @@ h1, h2, h3, h4, p { margin: 0; }
   top: 16px;
   display: grid;
   gap: 14px;
+}
+.request-log-panel {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.request-log-table {
+  min-width: 520px;
+}
+.request-log-table th,
+.request-log-table td {
+  white-space: nowrap;
 }
 .checker-empty-result {
   min-height: 220px;
@@ -744,11 +764,17 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
   padding: 24px;
   background: rgba(3, 5, 4, 0.72);
 }
+.json-modal-overlay {
+  z-index: 120;
+}
 
 .modal {
   width: min(920px, 100%);
   max-height: min(780px, calc(100vh - 48px));
   overflow: auto;
+}
+.checked-card-log-modal {
+  width: min(1180px, 100%);
 }
 
 .action-loader {
@@ -840,8 +866,8 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
 
 /* Responsive İyileştirmeler */
 @media (max-width: 900px) {
-  .checker-live-grid { grid-template-columns: 1fr; }
-  .checker-result-column { position: static; }
+  .checker-live-grid, .checker-standard-result-grid, .unchecked-page-grid { grid-template-columns: 1fr; }
+  .checker-result-column, .request-log-panel { position: static; max-height: none; }
   .form-grid, .card-input-component, .processor-filter, .summary, .details { grid-template-columns: 1fr; }
   .debt-grid { grid-template-columns: 1fr; }
   .live-card-visual { grid-template-columns: 1fr; }

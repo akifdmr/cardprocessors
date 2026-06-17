@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, toQuery } from '../../api/client'
 import { PaginationControls } from '../../components/common/Pagination'
 import { ResultCard } from '../../components/common/Details'
+import { maskLogPayload } from '../../components/common/RequestLogPanel'
 import { formatMoneyInput, operationResponseMessage, statusClass } from '../../utils/format'
 
 function serverPagination(meta, setPage, setPageSize) {
@@ -31,6 +32,75 @@ const emptyResponse = {
   },
 }
 
+function JsonModal({ value, onClose }) {
+  if (!value) return null
+  return (
+    <div className="modal-overlay json-modal-overlay" role="presentation" onClick={onClose}>
+      <article className="modal panel" role="dialog" aria-modal="true" aria-label={value.title} onClick={(event) => event.stopPropagation()}>
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">JSON Model</p>
+            <h3>{value.title}</h3>
+          </div>
+          <button className="ghost small" type="button" onClick={onClose}>Kapat</button>
+        </div>
+        <pre className="json-modal-pre">{JSON.stringify(maskLogPayload(value.payload || {}), null, 2)}</pre>
+      </article>
+    </div>
+  )
+}
+
+function CheckedCardLogsModal({ value, loading, error, onClose, onOpenJson }) {
+  if (!value) return null
+  return (
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
+      <article className="modal panel checked-card-log-modal" role="dialog" aria-modal="true" aria-label="Checked card logs" onClick={(event) => event.stopPropagation()}>
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">CheckedCard Logs</p>
+            <h3>{value.card?.maskedPan || value.card?.id || 'Log'}</h3>
+          </div>
+          <button className="ghost small" type="button" onClick={onClose}>Kapat</button>
+        </div>
+        {loading ? <p className="muted">Loglar yükleniyor...</p> : null}
+        {error ? <p className="bad">{error}</p> : null}
+        <div className="table-wrap">
+          <table className="request-log-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Request</th>
+                <th>Response</th>
+                <th>Full</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(value.logs || []).map((log) => {
+                const details = log.details || {}
+                return (
+                  <tr key={log.id || `${log.action}-${log.created_at}`}>
+                    <td>{log.created_at ? new Date(log.created_at).toLocaleString() : '-'}</td>
+                    <td>{log.action || '-'}</td>
+                    <td><span className={`pill ${statusClass(log.status)}`}>{log.status || '-'}</span></td>
+                    <td><button className="small ghost" type="button" onClick={() => onOpenJson(`${log.action || 'Log'} Request`, details.request || {})}>JSON</button></td>
+                    <td><button className="small ghost" type="button" onClick={() => onOpenJson(`${log.action || 'Log'} Response`, details.response || {})}>JSON</button></td>
+                    <td><button className="small ghost" type="button" onClick={() => onOpenJson(`${log.action || 'Log'} Full`, log)}>JSON</button></td>
+                  </tr>
+                )
+              })}
+              {!loading && !(value.logs || []).length ? (
+                <tr><td colSpan="6" className="muted">Bu kart için log yok</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  )
+}
+
 export function CheckedCardsPage({ runAction }) {
   const [data, setData] = useState(emptyResponse)
   const [page, setPage] = useState(1)
@@ -44,6 +114,10 @@ export function CheckedCardsPage({ runAction }) {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [busyRow, setBusyRow] = useState('')
+  const [logsModal, setLogsModal] = useState(null)
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsError, setLogsError] = useState('')
+  const [jsonModal, setJsonModal] = useState(null)
   const withLoader = runAction || ((task) => task())
 
   const pagination = useMemo(
@@ -158,6 +232,24 @@ export function CheckedCardsPage({ runAction }) {
     return busyRow === `${card.id}:${operation}`
   }
 
+  async function openLogs(card) {
+    setLogsModal({ card, logs: [] })
+    setLogsError('')
+    setLogsLoading(true)
+    try {
+      const logs = await api(`/audit-logs${toQuery({ entityType: 'checked_card', entityId: card.id, limit: 50 })}`)
+      setLogsModal({ card, logs })
+    } catch (logError) {
+      setLogsError(logError.message)
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  function openJson(title, payload) {
+    setJsonModal({ title, payload })
+  }
+
   return (
     <section className="panel page-stack">
       <div className="section-head">
@@ -211,6 +303,7 @@ export function CheckedCardsPage({ runAction }) {
               <th>Card Bank</th>
               <th>Balance</th>
               <th>İşlemler</th>
+              <th>Log</th>
             </tr>
           </thead>
           <tbody>
@@ -258,11 +351,14 @@ export function CheckedCardsPage({ runAction }) {
                     <button className="ghost small" type="button" disabled title={card.lastLiveMessage || 'Live result checked and stored'}>Live kayıtlı</button>
                   )}
                 </td>
+                <td>
+                  <button className="ghost small" type="button" onClick={() => openLogs(card)}>Log</button>
+                </td>
               </tr>
             ))}
             {!data.rows.length && (
               <tr>
-                <td colSpan="7" className="muted">Kayıt yok</td>
+                <td colSpan="8" className="muted">Kayıt yok</td>
               </tr>
             )}
           </tbody>
@@ -271,6 +367,14 @@ export function CheckedCardsPage({ runAction }) {
 
       <PaginationControls pagination={pagination} />
       {result ? <ResultCard title="Amazon Pay Result" status={result.status || result.result?.status} message={operationResponseMessage(result)} items={resultItems(result)} /> : null}
+      <CheckedCardLogsModal
+        value={logsModal}
+        loading={logsLoading}
+        error={logsError}
+        onClose={() => setLogsModal(null)}
+        onOpenJson={openJson}
+      />
+      <JsonModal value={jsonModal} onClose={() => setJsonModal(null)} />
     </section>
   )
 }

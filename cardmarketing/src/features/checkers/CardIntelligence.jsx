@@ -1,4 +1,3 @@
-import { Details, ResultCard } from '../../components/common/Details'
 import { displayStatus, operationResponseMessage, pickDetail, statusClass } from '../../utils/format'
 
 function displayValue(value) {
@@ -12,14 +11,12 @@ function displayValue(value) {
 export function CardIntelligence({ result, title = 'Card Intelligence', live }) {
   const details = result?.details || {}
   const summary = result?.summary || {}
-  const ipDetails = result?.ipDetails || {}
-  const usefulLabel = summary.usefulLabel || [
-    displayValue(summary.country || pickDetail(details, ['ISO Country Name', 'ISO Country Code A2'])),
-    displayValue(summary.issuer || pickDetail(details, ['Issuer Name / Bank'])),
-    displayValue(summary.level || pickDetail(details, ['Card Level'])),
-    displayValue(summary.type || pickDetail(details, ['Card Type'])),
-    displayValue(summary.scheme || pickDetail(details, ['Card Scheme', 'Card Brand'])),
-  ].filter(Boolean).join(' / ')
+  const compactDetails = {
+    'Kart Tipi': summary.type || pickDetail(details, ['Card Type']),
+    'Kart Seviyesi': summary.level || pickDetail(details, ['Card Level']),
+    'İhraççı Adı / Banka': summary.issuer || pickDetail(details, ['Issuer Name / Bank']),
+    'Ülke': summary.country || pickDetail(details, ['ISO Country Name', 'ISO Country Code A2']),
+  }
 
   return (
     <article className="card intelligence">
@@ -27,26 +24,15 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
         <strong>{title}</strong>
         <span className={`pill ${statusClass(result?.status)}`}>{result?.status || '-'}</span>
       </div>
-      <div className="result-hero">
-        <span>Useful BIN Result</span>
-        <strong>{usefulLabel || '-'}</strong>
-      </div>
       {result?.responseMessage || result?.failureReason || (result?.providerWarning && result?.status !== 'passed') ? (
         <p className={`error ${result?.status === 'passed' ? 'muted' : ''}`}>
           {result.responseMessage || result.failureReason || (result?.status !== 'passed' ? result.providerWarning : '')}
         </p>
       ) : null}
       <div className="summary">
-        <div><span>BIN/IIN</span><strong>{displayValue(summary.bin || result?.bin || details['BIN/IIN'])}</strong></div>
-        <div><span>Country</span><strong>{displayValue(summary.country || pickDetail(details, ['ISO Country Name', 'ISO Country Code A2']))}</strong></div>
-        <div><span>Issuer / Bank</span><strong>{displayValue(summary.issuer || pickDetail(details, ['Issuer Name / Bank']))}</strong></div>
-        <div><span>Level</span><strong>{displayValue(summary.level || pickDetail(details, ['Card Level']))}</strong></div>
-        <div><span>Type</span><strong>{displayValue(summary.type || pickDetail(details, ['Card Type']))}</strong></div>
-        <div><span>Scheme</span><strong>{displayValue(summary.scheme || pickDetail(details, ['Card Scheme']))}</strong></div>
-        <div><span>Brand</span><strong>{displayValue(summary.brand || pickDetail(details, ['Card Brand']))}</strong></div>
-        <div><span>Commercial</span><strong>{displayValue(summary.commercial || pickDetail(details, ['Commercial Card?']))}</strong></div>
-        <div><span>Prepaid</span><strong>{displayValue(summary.prepaid || pickDetail(details, ['Prepaid Card?']))}</strong></div>
-        <div><span>Currency</span><strong>{displayValue(summary.currency || pickDetail(details, ['Card Currency', 'ISO Country Currency']))}</strong></div>
+        {Object.entries(compactDetails).map(([label, value]) => (
+          <div key={label}><span>{label}</span><strong>{displayValue(value)}</strong></div>
+        ))}
       </div>
       {live ? (
         <section className="live-card-visual">
@@ -69,9 +55,6 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
           </div>
         </section>
       ) : null}
-      <h4>Kart / BIN Detayları</h4>
-      <Details items={details} />
-      {Object.keys(ipDetails).length ? <><h4>IP Detayları</h4><Details items={ipDetails} /></> : null}
     </article>
   )
 }

@@ -1,9 +1,34 @@
 import { useState } from 'react'
 
+function maskCardNumber(value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  if (digits.length < 10) return value
+  return `${digits.slice(0, 6)}${'*'.repeat(Math.max(4, digits.length - 10))}${digits.slice(-4)}`
+}
+
+export function maskLogPayload(value, key = '') {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskLogPayload(item))
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [entryKey, maskLogPayload(entryValue, entryKey)]))
+  }
+  const normalizedKey = String(key || '').toLowerCase()
+  if (/(cvv|cvc|ccv|securitycode)/.test(normalizedKey)) return value ? '[masked]' : value
+  if (/(pan|cardnumber|card_number|number)/.test(normalizedKey)) return maskCardNumber(value)
+  if (/(token|source|providerpaymenttoken)/.test(normalizedKey) && typeof value === 'string' && value.length > 12) {
+    return `${value.slice(0, 6)}...${value.slice(-4)}`
+  }
+  if (typeof value === 'string' && /^\d{12,19}$/.test(value.replace(/\s+/g, ''))) {
+    return maskCardNumber(value)
+  }
+  return value
+}
+
 function JsonModal({ value, onClose }) {
   if (!value) return null
   return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
+    <div className="modal-overlay json-modal-overlay" role="presentation" onClick={onClose}>
       <article className="modal panel" role="dialog" aria-modal="true" aria-label={value.title} onClick={(event) => event.stopPropagation()}>
         <div className="section-head">
           <div>
@@ -12,7 +37,7 @@ function JsonModal({ value, onClose }) {
           </div>
           <button className="ghost small" type="button" onClick={onClose}>Kapat</button>
         </div>
-        <pre className="json-modal-pre">{JSON.stringify(value.payload || {}, null, 2)}</pre>
+        <pre className="json-modal-pre">{JSON.stringify(maskLogPayload(value.payload || {}), null, 2)}</pre>
       </article>
     </div>
   )

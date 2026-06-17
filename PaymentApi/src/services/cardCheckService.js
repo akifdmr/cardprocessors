@@ -62,6 +62,19 @@ function normalizeCardInput(payload = {}) {
 
 function parseCardLine(line) {
   const parts = String(line || "").trim().split("|");
+  const month = digitsOnly(parts[1]);
+  const year = digitsOnly(parts[2]);
+  const cvvAfterYear = String(parts[3] || "").trim();
+  if (parts.length >= 4 && /^(0?[1-9]|1[0-2])$/.test(month) && /^(\d{2}|\d{4})$/.test(year) && cvvAfterYear) {
+    return normalizeCardInput({
+      cardNumber: parts[0],
+      exp: `${month}/${year}`,
+      cvv: parts[3],
+      zip: parts[4],
+      holderName: parts[5],
+      address: parts.slice(6).join("|")
+    });
+  }
   return normalizeCardInput({
     cardNumber: parts[0],
     exp: parts[1],
@@ -73,9 +86,10 @@ function parseCardLine(line) {
 }
 
 function maskPan(pan) {
-  const digits = digitsOnly(pan);
-  if (digits.length < 10) return null;
-  return `${digits.slice(0, 6)}******${digits.slice(-4)}`;
+  // const digits = digitsOnly(pan);
+  // if (digits.length < 10) return null;
+  // return `${digits.slice(0, 6)}******${digits.slice(-4)}`;
+  return pan;
 }
 
 function recordHash(card) {
@@ -165,8 +179,9 @@ async function liveCheckCard(payload = {}) {
 }
 
 async function checkCard(payload = {}) {
-  const live = await liveCheckCard(payload);
+  
   const binCheck = await binCheckCard(payload);
+  const live = await liveCheckCard(payload);
   return {
     status: liveCheckerService.isLiveResponse(live) ? "passed" : "review",
     live,

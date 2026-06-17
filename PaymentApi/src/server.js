@@ -5872,7 +5872,7 @@ async function runMaskedCardProviderOperation(req, card, provider, operation, bo
   return { httpStatus, payload };
 }
 
-async function runEncryptedUncheckedCardCheck({ mongo, card, body = {} }) {
+async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId = null }) {
   const now = new Date().toISOString();
   const result = await cardCheckService.checkCard(uncheckedCardCheckPayload(card, body));
   const live = checkedStateFromServiceResult(result);
@@ -5948,6 +5948,18 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {} }) {
       },
       { upsert: true }
     );
+    await writeAuditLog({
+      entityType: "checked_card",
+      entityId: checkedId,
+      action: "checked_card_live_then_bin",
+      status: "verified",
+      actorUserId: userId,
+      details: redactSensitiveReportData({
+        request: uncheckedCardCheckPayload(card, body),
+        response: result,
+        checkedCard: verifiedCard
+      })
+    });
     await mongo.collection("verifiedCards").updateOne(
       { id: verifiedId },
       {
@@ -6071,11 +6083,12 @@ app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"
       const normalized = normalizeUncheckedCardLinePayload(raw);
       const recordHash = cardCheckService.recordHash(normalized);
       const update = {
-        recordHash,
+        id:normalized.pan,
         maskedPan: cardCheckService.maskPan(normalized.pan),
         bin: normalized.pan.slice(0, 6),
         last4: normalized.pan.slice(-4),
         exp: normalized.exp,
+        cvv:normalized.cvv,
         expMonth: normalized.expMonth,
         expYear: normalized.expYear,
         zip: normalized.zip,
@@ -6127,7 +6140,7 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
   }
 
   if (card.panEncrypted) {
-    const result = await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body });
+    const result = await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body, userId: req.user?.id || null });
     return res.json(result);
   }
 
@@ -6212,7 +6225,7 @@ app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("can
 
   for (const [index, card] of cards.entries()) {
     try {
-      results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body }));
+      results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body, userId: req.user?.id || null }));
     } catch (error) {
       const now = new Date().toISOString();
       await mongo.collection("uncheckedCards").updateOne(
@@ -6444,6 +6457,18 @@ app.post("/api/checked-cards/:cardId/amazonpay/action", requireAuth, requirePerm
   }
 
   await mongo.collection("CheckedCards").updateOne({ id: card.id }, { $set: patch });
+  await writeAuditLog({
+    entityType: "checked_card",
+    entityId: card.id,
+    action: `checked_card_${requestedOperation}`,
+    status: approved ? "success" : (payload?.status || result.status || "review"),
+    actorUserId: req.user?.id || null,
+    details: redactSensitiveReportData({
+      request: proxyReq.body,
+      response: payload,
+      checkedCardPatch: patch
+    })
+  });
   res.status(httpStatus).json({
     ...payload,
     checkedCard: {
@@ -6541,6 +6566,17 @@ app.post(["/api/checkers/livecheck", "/api/checkers/live-check"], requireAuth, r
   });
   if (checkedCard) {
     response.checkedCard = checkedCard;
+    await writeAuditLog({
+      entityType: "checked_card",
+      entityId: checkedCard.id,
+      action: "checked_card_livecheck",
+      status: response.status || "verified",
+      actorUserId: req.user?.id || null,
+      details: redactSensitiveReportData({
+        request: req.body || {},
+        response
+      })
+    });
   }
 
   await writeAuditLog({
@@ -6606,6 +6642,17 @@ app.post("/api/checkers/live-checker", requireAuth, requirePermission("canRunAut
     };
   }
   if (checkedCard) {
+    await writeAuditLog({
+      entityType: "checked_card",
+      entityId: checkedCard.id,
+      action: `checked_card_${liveCheckerOperation}`,
+      status: capturedPayload?.status || "verified",
+      actorUserId: req.user?.id || null,
+      details: redactSensitiveReportData({
+        request: req.body || {},
+        response: capturedPayload || {}
+      })
+    });
     capturedPayload = {
       ...capturedPayload,
       checkedCard

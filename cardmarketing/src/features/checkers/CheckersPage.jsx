@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ResultCard } from '../../components/common/Details'
+import { RequestLogPanel } from '../../components/common/RequestLogPanel'
 import { CardInput } from '../../components/forms/CardInput'
 import { formatMoneyInput, moneyValue, operationResponseMessage } from '../../utils/format'
 import { CardIntelligence } from './CardIntelligence'
@@ -355,8 +356,49 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
   const [form, setForm] = useState({ provider: 'clover', amount: '0.20', currency: 'USD', quantity: '10', maxAttempts: '30', billingZip: '00000', liveMode: 'single', bulkDelayMs: '0', bulkConcurrency: '3', liveOperation: 'verification' })
   const [result, setResult] = useState(null)
   const [amazonFlow, setAmazonFlow] = useState(null)
+  const [requestLogs, setRequestLogs] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
+
+  function pushRequestLog({ action, request, response, ok = true, status = 'ok' }) {
+    setRequestLogs((current) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        time: new Date().toLocaleTimeString(),
+        action,
+        request,
+        response,
+        ok,
+        status,
+      },
+      ...current,
+    ].slice(0, 50))
+  }
+
+  async function loggedApi(endpoint, body, action) {
+    const request = { endpoint: `/api${endpoint}`, body }
+    try {
+      const response = await api(endpoint, { method: 'POST', body: JSON.stringify(body) })
+      pushRequestLog({
+        action,
+        request,
+        response,
+        ok: response?.status !== 'failed',
+        status: response?.status || response?.resultCode || 'ok',
+      })
+      return response
+    } catch (error) {
+      const response = error.data || { status: 'failed', responseMessage: error.message, statusCode: error.status }
+      pushRequestLog({
+        action,
+        request,
+        response,
+        ok: false,
+        status: response.status || error.status || 'failed',
+      })
+      throw error
+    }
+  }
 
   function withSavedCard(payload) {
     const card = cards.find((item) => item.id === payload.cardId)
@@ -380,7 +422,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
       throw new Error('BIN/IIN için 6 rakam gerekli. Kayıtlı kartta ilk 6 yoksa Manual Card seçip BIN gir.')
     }
     try {
-      const response = await api('/providers/paypal/manager/cards/bin-check', { method: 'POST', body: JSON.stringify({ ...payload, bin: normalizedBin }) })
+      const response = await loggedApi('/checkers/bincheck', { ...payload, bin: normalizedBin }, 'BIN Check')
       if (isRapidApiQuotaResult(response)) {
         return offlineBinResult(normalizedBin, response.responseMessage || response.failureReason)
       }
@@ -394,10 +436,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
   }
 
   async function runLiveWithBin(payload, provider, operation = 'live') {
-    const liveResp = await api('/checkers/live-checker', {
-      method: 'POST',
-      body: JSON.stringify({ ...payload, provider, operation })
-    })
+    const liveResp = await loggedApi('/checkers/livecheck', { ...payload, provider, operation, runBinCheck: true }, 'Live Check')
 
     let bin = liveResp.binCheck || null
     if (!bin) {
@@ -437,10 +476,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     delete checkoutPayload.source
     delete checkoutPayload.token
 
-    const checkoutResponse = await api('/checkers/live-checker', {
-      method: 'POST',
-      body: JSON.stringify({ ...checkoutPayload, provider: 'amazonpay', operation: 'checkout_session' }),
-    })
+    const checkoutResponse = await loggedApi('/checkers/livecheck', { ...checkoutPayload, provider: 'amazonpay', operation: 'checkout_session' }, 'Amazon Pay Checkout')
     const operationMeta = selectedLiveOperation('amazonpay', operation)
     setAmazonFlow({
       targetOperation: operation,
@@ -469,15 +505,12 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
         let completeResponse = null
         const checkoutSessionId = amazonFlow.checkoutSessionId || amazonCheckoutSessionId(amazonFlow.checkoutResponse)
         if (!chargePermissionId && checkoutSessionId) {
-          completeResponse = await api('/checkers/live-checker', {
-            method: 'POST',
-            body: JSON.stringify(compactPayload({
+          completeResponse = await loggedApi('/checkers/livecheck', compactPayload({
               ...amazonFlow.originalPayload,
               provider: 'amazonpay',
               operation: 'complete_checkout_session',
               checkoutSessionId,
-            })),
-          })
+            }), 'Amazon Pay Complete')
           chargePermissionId = amazonChargePermissionId(completeResponse)
         }
 
@@ -649,12 +682,8 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
             return
           }
 
-          const balanceRequest = api('/checkers/live-checker', {
-            method: 'POST',
-            body: JSON.stringify({ ...payload, provider: 'amazonpay', operation: 'verification' }),
-          })
-
-          setResult({ type: 'simple', title: 'Amazon Pay Balance Check', data: await balanceRequest })
+          const balanceResponse = await loggedApi('/checkers/livecheck', { ...payload, provider: 'amazonpay', operation: 'verification' }, 'Amazon Pay Balance')
+          setResult({ type: 'simple', title: 'Amazon Pay Balance Check', data: balanceResponse })
           await onRefreshCards()
           return
         }
@@ -857,10 +886,16 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
                 </div>
               </article>
             )}
+            <RequestLogPanel logs={requestLogs} title="LiveChecker Logs" />
           </div>
         ) : null}
       </section>
-      {tab !== 'live' ? resultView : null}
+      {tab !== 'live' ? (
+        <div className="checker-standard-result-grid">
+          <div>{resultView}</div>
+          <RequestLogPanel logs={requestLogs} title="Checker Logs" />
+        </div>
+      ) : null}
     </div>
   )
 }
