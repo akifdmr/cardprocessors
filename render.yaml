@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cardmarket
+    name: cardprocessors
     runtime: node
     plan: starter
     buildCommand: npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy

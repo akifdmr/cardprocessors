@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CardInput } from '../../components/forms/CardInput'
 import { formatMoneyInput } from '../../utils/format'
 
-const cardFields = new Set(['pan', 'expMonth', 'expYear', 'expiry', 'cvv2', 'cvv', 'bin'])
+const cardFields = new Set(['pan', 'expMonth', 'expYear', 'expiry', 'cvv2', 'cvv', 'bin', 'billingZip'])
 const moneyFields = new Set(['amount', 'sequenceAmount1', 'sequenceAmount2', 'balanceAmount', 'gratuityAmount'])
 
 const fieldLabels = {
@@ -26,6 +26,11 @@ const fieldLabels = {
   currency: 'Currency',
   customerVaultId: 'Customer Vault ID',
   providerPaymentToken: 'Provider Token',
+  email: 'Email',
+  phone: 'Phone',
+  transactionReferenceId: 'Transaction Reference',
+  customerReferenceId: 'Customer Reference',
+  otp: 'OTP',
 }
 
 function defaultPayloadFor(fields) {
@@ -34,6 +39,7 @@ function defaultPayloadFor(fields) {
   if (fields.includes('sequenceAmount2')) payload.sequenceAmount2 = '1,100.25'
   if (fields.includes('captureComplete')) payload.captureComplete = 'true'
   if (fields.includes('achEntryCode')) payload.achEntryCode = 'WEB'
+  if (fields.includes('billingZip')) payload.billingZip = '00000'
   return payload
 }
 
@@ -56,6 +62,7 @@ function normalizedProvider(providerKey) {
   if (key === 'global-payments' || key === 'portico') return 'globalpayments'
   if (key === 'networkmerchants' || key === 'network-merchants') return 'nmi'
   if (key === 'zohopayments' || key === 'zoho-payments' || key === 'zoho_payment') return 'zoho'
+  if (key === 'quikliepay' || key === 'quiklie-payment' || key === 'quicklie' || key === 'quickliepay' || key === 'quicklie-payment') return 'quiklie'
   return key
 }
 
@@ -68,15 +75,17 @@ function formProfileFor(providerKey, method = {}, fields = []) {
   const provider = normalizedProvider(providerKey)
   const operation = String(method.operation || method.key || '').toLowerCase()
   const fieldSet = new Set(fields)
-  const isTransactionOnly = ['capture', 'refund', 'void', 'reversal', 'transaction_detail'].includes(operation)
+  const isTransactionOnly = ['capture', 'refund', 'void', 'reversal', 'transaction_detail', 'verify_otp'].includes(operation)
+  const isLiveCheck = ['verification', 'verify', 'live'].includes(operation)
   const hasCardNumber = fieldSet.has('pan') || fieldSet.has('expiry')
 
   return {
-    savedCard: hasCardNumber && !['propelrpay'].includes(provider),
+    savedCard: hasCardNumber && !isLiveCheck && !['propelrpay'].includes(provider),
     bin: fieldSet.has('bin'),
     cvv: fieldSet.has('cvv2') || fieldSet.has('cvv'),
+    zip: fieldSet.has('billingZip'),
     holder: fieldSet.has('cardholderName'),
-    address: fieldSet.has('addressFields') || fieldSet.has('billingZip') || fieldSet.has('billingAddressLine1'),
+    address: fieldSet.has('addressFields') || fieldSet.has('billingAddressLine1'),
     source: fieldSet.has('source'),
     amount: fieldSet.has('amount') && !isTransactionOnly,
     currency: fieldSet.has('currency') && !isTransactionOnly,
@@ -111,7 +120,7 @@ function GenericField({ field, value, required, onChange }) {
   }
 
   return (
-    <label className={['retref', 'transactionId', 'authorizationPnref', 'accountNumber', 'note', 'description', 'token', 'source'].includes(field) ? 'full' : ''}>
+    <label className={['retref', 'transactionId', 'authorizationPnref', 'accountNumber', 'note', 'description', 'token', 'source', 'transactionReferenceId', 'customerReferenceId'].includes(field) ? 'full' : ''}>
       <span>{labelFor(field)}</span>
       <input
         required={required}
@@ -206,6 +215,7 @@ export function ProcessorOperationForm({ open, providerKey, methodKey, catalog, 
             source={fields.includes('source')}
             bin={profile.bin}
             cvv={profile.cvv}
+            zip={profile.zip}
             holder={profile.holder}
             address={profile.address}
             amount={profile.amount}

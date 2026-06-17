@@ -34,6 +34,37 @@ export function statusClass(status) {
   return 'warn'
 }
 
+export function displayStatus(status) {
+  const value = String(status || '').toLowerCase()
+  if (value === 'tokenized' || value === 'token_ready') return 'TOKENIZED - AUTH YOK'
+  if (value === 'declined') return 'DECLINED'
+  if (value === 'approved' || value === 'authorized') return 'APPROVED'
+  return status || '-'
+}
+
+export function operationResponseMessage(result = {}) {
+  const status = String(result.status || result.result?.status || '').toLowerCase()
+  const provider = result.provider || result.result?.processor || ''
+  const message = result.responseMessage || result.result?.responseMessage || result.failureReason || result.error
+  const code = result.resultCode || result.result?.resultCode
+  if (provider === 'clover' && status === 'declined') {
+    return message || 'Clover kartı reddetti. Karttan ödeme alınabilir görünmüyor.'
+  }
+  if (provider === 'clover' && code === 'CLOVER_ECOMMERCE_UNAUTHORIZED') {
+    return message || 'Clover eCommerce token yetkisi geçersiz.'
+  }
+  if (provider === 'clover' && code === 'CLOVER_CARD_VERIFIED') {
+    return message || 'Clover card verification tamamlandı. Charge/preauth oluşturulmadı.'
+  }
+  if (status === 'approved' || status === 'authorized') {
+    return message || 'İşlem onaylandı. Karttan ödeme alınabilir görünüyor.'
+  }
+  if (status === 'failed') {
+    return message || 'İşlem başarısız oldu.'
+  }
+  return message || ''
+}
+
 export function detailValue(value) {
   if (value === null || value === undefined || value === '') return '-'
   if (typeof value === 'object') return JSON.stringify(value)

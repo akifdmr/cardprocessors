@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, toQuery } from '../../api/client'
 import { ResultCard } from '../../components/common/Details'
-import { formatMoneyInput, moneyValue } from '../../utils/format'
+import { formatMoneyInput, moneyValue, operationResponseMessage } from '../../utils/format'
 import { normalizeProcessorPayload, normalizeProviderKey } from './actions/processorActions'
 import { ProcessorActionModal } from './ProcessorActionModal'
 import { ProcessorList } from './ProcessorList'
@@ -10,6 +10,18 @@ import { ProcessorOperationPage } from './ProcessorOperationPage'
 
 function compactPayload(payload) {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+}
+
+function processorResultItems(result = {}) {
+  return {
+    Provider: result.provider || result.result?.processor || '-',
+    Operation: result.operation || '-',
+    Status: result.status || result.result?.status || '-',
+    Transaction: result.result?.transactionId || result.transactionId || result.result?.retref || '-',
+    Code: result.resultCode || result.result?.resultCode || '-',
+    ProviderStatus: result.result?.providerStatus || result.providerStatus || '-',
+    ProviderMessage: result.result?.providerMessage || '-',
+  }
 }
 
 export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction }) {
@@ -69,6 +81,9 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
     if (method.operation === 'transaction_detail') {
       return api(`/providers/${provider === 'propelrpay' ? 'propelr' : provider}/transactions/${encodeURIComponent(body.transactionId || body.retref || body.authorizationPnref || 'invalid')}`)
     }
+    if (provider === 'quiklie' && method.operation === 'verify_otp') {
+      return api('/providers/quiklie/otp/verify', { method: 'POST', body: JSON.stringify(body) })
+    }
     return api('/provider-operations/cards', { method: 'POST', body: JSON.stringify(body) })
   }
 
@@ -97,7 +112,18 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
 
       const provider = normalizeProviderKey(providerKey)
       body = compactPayload(normalizeProcessorPayload(provider, body))
-      const response = await executeProcessorRequest(provider, method, body)
+      let response
+      try {
+        response = await executeProcessorRequest(provider, method, body)
+      } catch (error) {
+        response = error.data || {
+          status: 'failed',
+          provider,
+          operation: method.operation,
+          responseMessage: error.message,
+          providerStatus: error.status,
+        }
+      }
       setResult(response)
       await load()
     }, loaderMetaFor(providerKey, method, loaderOverride))
@@ -139,7 +165,7 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
           onSubmit={submitOperation}
           onDropInResult={handleDropInResult}
         />
-        {result ? <ResultCard title="Processor Result" status={result.status || result.result?.status} message={result.responseMessage || result.result?.responseMessage || result.error} items={{ Provider: result.provider, Operation: result.operation, Transaction: result.result?.transactionId || result.transactionId || result.result?.retref, Code: result.resultCode || result.result?.resultCode }} /> : null}
+        {result ? <ResultCard title="Processor Result" status={result.status || result.result?.status} message={operationResponseMessage(result)} items={processorResultItems(result)} /> : null}
       </>
     )
   }
@@ -166,7 +192,7 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
 
       <ProcessorLogTable logs={data?.logs || []} canViewJson={data?.canViewJsonModels} onAction={(log, action) => setRowAction({ log, action })} />
       {rowAction ? <ProcessorActionModal log={rowAction.log} action={rowAction.action} onClose={() => setRowAction(null)} onSubmit={submitRowAction} /> : null}
-      {result ? <ResultCard title="Processor Result" status={result.status || result.result?.status} message={result.responseMessage || result.result?.responseMessage || result.error} items={{ Provider: result.provider, Operation: result.operation, Transaction: result.result?.transactionId || result.transactionId || result.result?.retref, Code: result.resultCode || result.result?.resultCode }} /> : null}
+      {result ? <ResultCard title="Processor Result" status={result.status || result.result?.status} message={operationResponseMessage(result)} items={processorResultItems(result)} /> : null}
     </div>
   )
 }

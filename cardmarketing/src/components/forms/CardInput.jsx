@@ -24,6 +24,8 @@ export function CardInput({
   amount = false,
   amountLabel = 'Amount',
   currency = false,
+  zip = false,
+  zipDefault = '00000',
 }) {
   const [addressOpen, setAddressOpen] = useState(false)
   const selected = useMemo(() => cards.find((card) => card.id === value.cardId), [cards, value.cardId])
@@ -94,6 +96,12 @@ export function CardInput({
                   <input value={value.cardholderName || ''} onChange={(event) => patch({ cardholderName: event.target.value })} />
                 </label>
               ) : null}
+              {zip ? (
+                <label>
+                  <span>ZIP</span>
+                  <input value={value.billingZip ?? zipDefault} inputMode="numeric" autoComplete="postal-code" onChange={(event) => patch({ billingZip: event.target.value.replace(/\D/g, '').slice(0, 10) })} />
+                </label>
+              ) : null}
             </>
           ) : null}
         </>
@@ -118,7 +126,7 @@ export function CardInput({
         </label>
       ) : null}
 
-      {address && !selected && !binOnly ? (
+      {address && !selected && !binOnly && !zip ? (
         <div className="address-block full">
           <button type="button" className="ghost small" onClick={() => setAddressOpen((item) => !item)}>
             {addressOpen ? 'Adres Bilgisi Kapat' : 'Adres Bilgisi Ekle'}

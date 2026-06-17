@@ -16,6 +16,7 @@ const nmiService = require("./services/nmiService");
 const zohoPaymentsService = require("./services/zohoPaymentsService");
 const globalPaymentsService = require("./services/globalPaymentsService");
 const propelrPayService = require("./services/propelrPayService");
+const quikliePaymentService = require("./services/quikliePaymentService");
 const paypalService = require("./services/paypalService");
 const providerRouter = require("./services/providerRouter");
 const twilioVoiceService = require("./services/twilioVoiceService");
@@ -113,7 +114,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "providerPaymentToken", "last4", "expMonth", "expYear"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
           providerPaymentToken: { type: "string" },
           last4: { type: "string" },
           expMonth: { type: "string" },
@@ -168,7 +169,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "verificationStatus"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
           verificationStatus: { type: "string", enum: ["pending", "verified", "declined", "review"] },
           providerReferenceId: { type: "string" },
           avsResult: { type: "string" },
@@ -488,7 +489,7 @@ const openApiDocument = {
     },
     "/api/providers/clover/cards/verify-with-bin": {
       post: {
-        summary: "Run Clover card verification and RapidAPI BIN lookup together",
+        summary: "Run Clover card tokenization and RapidAPI BIN lookup together",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -498,7 +499,7 @@ const openApiDocument = {
             }
           }
         },
-        responses: { 200: { description: "Clover verification and BIN lookup result" } }
+        responses: { 200: { description: "Clover tokenization and BIN lookup result" } }
       }
     },
     "/api/providers/clover/refund": {
@@ -1500,7 +1501,8 @@ async function upsertProviderCardRecord({
   providerReferenceId = null,
   avsResult = null,
   authResultCode = null,
-  notes = null
+  notes = null,
+  binCheck = null
 }) {
   if (!providerPaymentToken) {
     return null;
@@ -1526,6 +1528,31 @@ async function upsertProviderCardRecord({
     ? existing.provider_reference_id
     : providerReferenceId;
 
+  const cardUpdate = {
+    masked_pan: maskedPan,
+    first6: details.first6,
+    last4: details.last4,
+    brand: details.brand,
+    exp_month: details.expMonth,
+    exp_year: details.expYear,
+    cardholder_name: details.cardholderName,
+    billing_address_line1: payload.billingAddressLine1 || payload.street || null,
+    billing_city: payload.billingCity || payload.city || null,
+    billing_state: payload.billingState || payload.state || null,
+    billing_zip: details.billingZip,
+    billing_country: payload.billingCountry || payload.country || null,
+    verification_status: verificationStatus,
+    avs_result: avsResult,
+    auth_result_code: authResultCode,
+    provider_reference_id: storedProviderReferenceId,
+    notes,
+    updated_at: nowIso
+  };
+  if (binCheck) {
+    cardUpdate.bin_check = binCheck;
+    cardUpdate.bin_check_updated_at = nowIso;
+  }
+
   await database.collection("cards").updateOne(
     { provider, provider_payment_token: providerPaymentToken },
     {
@@ -1537,26 +1564,7 @@ async function upsertProviderCardRecord({
         pan_encrypted: encrypt(details.normalizedPan || ""),
         created_at: nowIso
       },
-      $set: {
-        masked_pan: maskedPan,
-        first6: details.first6,
-        last4: details.last4,
-        brand: details.brand,
-        exp_month: details.expMonth,
-        exp_year: details.expYear,
-        cardholder_name: details.cardholderName,
-        billing_address_line1: payload.billingAddressLine1 || payload.street || null,
-        billing_city: payload.billingCity || payload.city || null,
-        billing_state: payload.billingState || payload.state || null,
-        billing_zip: details.billingZip,
-        billing_country: payload.billingCountry || payload.country || null,
-        verification_status: verificationStatus,
-        avs_result: avsResult,
-        auth_result_code: authResultCode,
-        provider_reference_id: storedProviderReferenceId,
-        notes,
-        updated_at: nowIso
-      }
+      $set: cardUpdate
     },
     { upsert: true }
   );
@@ -1643,9 +1651,11 @@ function getProviderReportCatalog() {
   const zohoStatus = zohoPaymentsService.getStatus();
   const globalPaymentsStatus = globalPaymentsService.getStatus();
   const propelrPayStatus = propelrPayService.getStatus();
+  const quiklieStatus = quikliePaymentService.getStatus();
   const cloverMissing = missingEnv([
     ["CLOVER_MERCHANT_ID", env.providers.clover.merchantId],
-    ["CLOVER_API_TOKEN or CLOVER_API_KEY", env.providers.clover.apiKey]
+    ["CLOVER_ECOMM_PUBLIC_TOKEN", env.providers.clover.publicToken],
+    ["CLOVER_ECOMM_PRIVATE_TOKEN", env.providers.clover.apiKey]
   ]);
   const rapidApiMissing = missingEnv([
     ["RAPIDAPI_BIN_CHECKER_KEY", process.env.RAPIDAPI_BIN_CHECKER_KEY || process.env.X_RAPIDAPI_KEY]
@@ -1683,7 +1693,7 @@ function getProviderReportCatalog() {
         "CLOVER_API_BASE_URL defaults to https://api.clover.com",
         "Clover uses the eCommerce API with tokenized source values; hosted iframe config is not required"
       ],
-      capabilities: ["merchant", "orders", "payments", "tenders", "ecommerce_preauth", "ecommerce_verify_with_bin", "refund"]
+      capabilities: ["merchant", "orders", "payments", "tenders", "ecommerce_preauth", "tokenize_with_bin", "refund"]
     },
     {
       key: "paypal",
@@ -1803,6 +1813,31 @@ function getProviderReportCatalog() {
         "Set operation paths before running live sale/auth/verification/capture/refund/void calls"
       ],
       capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "verification", "transaction_detail"]
+    },
+    {
+      key: "quiklie",
+      group: "payment_gateways",
+      label: "Quiklie Payment",
+      configured: quiklieStatus.configured,
+      missing: quiklieStatus.missing,
+      optionalMissing: Object.entries(quiklieStatus.pathStatus || {})
+        .filter(([, configured]) => !configured)
+        .map(([key]) => ({
+          status: "QUIKLIE_PAYMENT_STATUS_PATH",
+          processPayment: "QUIKLIE_PAYMENT_PROCESS_PATH",
+          sale: "QUIKLIE_PAYMENT_SALE_PATH",
+          authorize: "QUIKLIE_PAYMENT_AUTH_PATH",
+          verification: "QUIKLIE_PAYMENT_VERIFY_PATH",
+          transaction: "QUIKLIE_PAYMENT_TRANSACTION_PATH",
+          verifyOtp: "QUIKLIE_PAYMENT_VERIFY_OTP_PATH"
+        }[key] || `QUIKLIE_PAYMENT_${key.toUpperCase()}_PATH`)),
+      configNotes: [
+        "Required: QUIKLIE_PAYMENT_API_BASE_URL, QUIKLIE_PAYMENT_API_KEY and QUIKLIE_PAYMENT_MERCHANT_ID",
+        "S2S V2 card payments use POST /api/v2/process-payment with midType=TWO_D",
+        "Authentication uses x-api-key and x-source=api headers",
+        "QUIKLIE_* and QUICKLIE_* aliases are also accepted"
+      ],
+      capabilities: ["status", "test", "sale", "auth", "verification", "verify_otp", "transaction_detail"]
     },
     {
       key: "rapidapi_bin_checker",
@@ -1964,7 +1999,8 @@ function getPaymentProcessorHealthChecks() {
     { key: "nmi", check: () => nmiService.testConnection() },
     { key: "zoho", check: () => zohoPaymentsService.testConnection() },
     { key: "globalpayments", check: () => globalPaymentsService.testConnection() },
-    { key: "propelrpay", check: () => propelrPayService.testConnection() }
+    { key: "propelrpay", check: () => propelrPayService.testConnection() },
+    { key: "quiklie", check: () => quikliePaymentService.testConnection() }
   ];
 }
 
@@ -2188,6 +2224,31 @@ function getOperationFailureReason({ result = {}, binCheck = null, fallback = ""
     "Provider returned a non-success status";
 }
 
+function pickNestedValue(source, paths = []) {
+  for (const path of paths) {
+    const value = String(path).split(".").reduce((acc, part) => acc?.[part], source);
+    if (value != null && value !== "" && value !== "API Only") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function readableBinPart(value) {
+  if (value == null || value === "" || value === "API Only") return "";
+  if (typeof value === "object") return value.name || value.label || value.value || "";
+  return String(value).trim();
+}
+
+function formatBinCheckLine(binCheck) {
+  if (!binCheck) return null;
+  const country = readableBinPart(pickNestedValue(binCheck, ["summary.country", "details.ISO Country Name", "details.ISO Country Code A2"]));
+  const issuer = readableBinPart(pickNestedValue(binCheck, ["summary.issuer", "details.Issuer Name / Bank", "details.Issuer"]));
+  const type = readableBinPart(pickNestedValue(binCheck, ["summary.type", "details.Card Type"])).toUpperCase();
+  const brand = readableBinPart(pickNestedValue(binCheck, ["summary.brand", "summary.scheme", "details.Card Brand", "details.Card Scheme"])).toUpperCase();
+  return [country, issuer, type, brand].filter(Boolean).join(" / ") || null;
+}
+
 function buildOperationResponseModel({
   operationId = uuidv4(),
   provider,
@@ -2231,6 +2292,7 @@ function buildOperationResponseModel({
     result,
     providerResponse: result,
     binCheck,
+    binCheckLine: formatBinCheckLine(binCheck),
     tokenization,
     logs,
     timestamps: {
@@ -2285,20 +2347,23 @@ function getExceptionResultCode(error, httpStatus) {
 
 function buildExceptionResult(error) {
   const httpStatus = getExceptionHttpStatus(error);
-  const providerMessage = isAxiosError(error) ? getProviderMessage(error) : null;
-  const message = providerMessage ||
+  const providerMessage = isAxiosError(error) ? getProviderMessage(error) : error?.providerMessage || null;
+  const providerStatus = isAxiosError(error) ? error.response?.status || null : error?.providerStatus || null;
+  const message = error?.message ||
+    providerMessage ||
     (httpStatus < 500 ? error?.message : null) ||
     "Internal server error";
 
   return {
     httpStatus,
     result: {
-      status: "failed",
+      status: error?.operationStatus || "failed",
       resultCode: getExceptionResultCode(error, httpStatus),
       responseMessage: message,
       failureReason: message,
-      providerStatus: isAxiosError(error) ? error.response?.status || null : null,
+      providerStatus,
       providerMessage,
+      providerData: error?.providerData || null,
       errorType: error?.name || "Error"
     }
   };
@@ -2418,6 +2483,7 @@ function classifyAttemptProvider(attempt) {
   if (attempt.provider === "zoho") return "zoho";
   if (attempt.provider === "globalpayments") return "globalpayments";
   if (attempt.provider === "propelrpay") return "propelrpay";
+  if (attempt.provider === "quiklie") return "quiklie";
   if (attempt.provider === "paypal") return "paypal";
   return attempt.provider || "unknown";
 }
@@ -2432,6 +2498,7 @@ function classifyAuditProvider(log) {
   if (action.startsWith("zoho_") || entityId.startsWith("zoho")) return "zoho";
   if (action.startsWith("globalpayments_") || entityId.startsWith("globalpayments")) return "globalpayments";
   if (action.startsWith("propelrpay_") || entityId.startsWith("propelrpay")) return "propelrpay";
+  if (action.startsWith("quiklie_") || entityId.startsWith("quiklie")) return "quiklie";
   if (action.startsWith("paypal_") || entityId.startsWith("paypal")) return "paypal";
   if (action.startsWith("twilio_") || entityId.startsWith("twilio")) return "twilio_voice";
   if (action.startsWith("telnyx_") || entityId.startsWith("telnyx")) return "telnyx_voice";
@@ -2548,6 +2615,20 @@ function requirePropelrPayConfigured(res) {
   return true;
 }
 
+function requireQuiklieConfigured(res) {
+  const status = quikliePaymentService.getStatus();
+  if (!status.configured) {
+    const missingText = status.missing?.length ? `: ${status.missing.join(", ")}` : "";
+    res.status(400).json({
+      error: `Quiklie Payment configuration is incomplete${missingText}`,
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
 function getCardProviderConfigStatus(provider) {
   if (provider === "paypal") {
     const managerStatus = paypalService.getManagerStatus();
@@ -2562,7 +2643,8 @@ function getCardProviderConfigStatus(provider) {
   if (provider === "clover") {
     const missing = missingEnv([
       ["CLOVER_MERCHANT_ID", env.providers.clover.merchantId],
-      ["CLOVER_API_TOKEN or CLOVER_API_KEY", env.providers.clover.apiKey]
+      ["CLOVER_ECOMM_PUBLIC_TOKEN", env.providers.clover.publicToken],
+      ["CLOVER_ECOMM_PRIVATE_TOKEN", env.providers.clover.apiKey]
     ]);
     return {
       configured: missing.length === 0,
@@ -2617,6 +2699,15 @@ function getCardProviderConfigStatus(provider) {
       configured: status.configured,
       missing: status.missing || [],
       message: `PropelrPay configuration is incomplete${missingText}`
+    };
+  }
+  if (provider === "quiklie") {
+    const status = quikliePaymentService.getStatus();
+    const missingText = status.missing?.length ? `: ${status.missing.join(", ")}` : "";
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: `Quiklie Payment configuration is incomplete${missingText}`
     };
   }
   return {
@@ -2687,8 +2778,8 @@ const providerOperationCatalog = {
         label: "Verification",
         endpoint: "POST /api/provider-operations/cards",
         operation: "verification",
-        fields: ["pan", "expiry", "amount", "merchid"],
-        required: ["pan", "expiry"],
+        fields: ["pan", "expiry", "cvv2", "billingZip", "amount", "merchid"],
+        required: ["pan", "expiry", "cvv2"],
         features: ["Provider-only verification", "Does not trigger PayPal BIN check unless runBinCheck is true"]
       },
       {
@@ -2755,7 +2846,7 @@ const providerOperationCatalog = {
     methods: [
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Gateway sale", "Amount in cents"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold", "Capture later"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Verification transaction"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Verification transaction"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture an auth"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund provider transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Void provider transaction"] }
@@ -2769,7 +2860,7 @@ const providerOperationCatalog = {
     methods: [
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["chargePaymentMethod", "Amount is decimal currency value"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["authorizePaymentMethod", "Capture later by transaction id"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Tokenizes card as a payment method", "No capture or sale is submitted"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Tokenizes card as a payment method", "No capture or sale is submitted"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture previous authorization"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund previous transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Reverse an unsettled transaction"] }
@@ -2783,7 +2874,7 @@ const providerOperationCatalog = {
     methods: [
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts type=sale to /api/transact.php", "Amount is a decimal currency value"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts type=auth for an authorization hold", "Capture later by transaction id"] },
-      { key: "verification", label: "Validate", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Posts type=validate", "No amount is required"] },
+      { key: "verification", label: "Validate", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Posts type=validate", "No amount is required"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Captures a previous auth by transaction id"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refunds a previous transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids an unsettled transaction"] },
@@ -2798,7 +2889,7 @@ const providerOperationCatalog = {
     methods: [
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts a sale payload to ZOHO_PAYMENTS_SALE_PATH", "Amount is a decimal currency value"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Posts an authorization payload to ZOHO_PAYMENTS_AUTH_PATH", "Capture later by transaction id"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Posts card verification to ZOHO_PAYMENTS_VERIFY_PATH", "No amount is required by default"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Posts card verification to ZOHO_PAYMENTS_VERIFY_PATH", "No amount is required by default"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Captures a previous authorization by transaction id"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refunds a previous transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids or cancels an unsettled transaction"] },
@@ -2813,19 +2904,33 @@ const providerOperationCatalog = {
     methods: [
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Sale request"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization request"] },
-      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear"], features: ["Card verification"] },
+      { key: "verification", label: "Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Card verification"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Capture previous auth"] },
       { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount"], required: ["transactionId"], features: ["Refund previous transaction"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Void previous transaction"] }
+    ]
+  },
+  quiklie: {
+    key: "quiklie",
+    provider: "quiklie",
+    label: "Quiklie Payment",
+    description: "Quiklie S2S V2 card operations. All card payments are forced through 2D processing.",
+    methods: [
+      { key: "sale", label: "2D Payment", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "email", "phone", "transactionReferenceId"], required: ["pan", "expMonth", "expYear", "cvv2", "amount"], features: ["POST /api/v2/process-payment", "midType is always TWO_D"] },
+      { key: "auth", label: "2D Auth Check", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "email", "phone", "transactionReferenceId"], required: ["pan", "expMonth", "expYear", "cvv2", "amount"], features: ["Uses the same 2D process-payment endpoint", "No 3D redirect is requested"] },
+      { key: "verification", label: "2D Live Check", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "email", "phone", "transactionReferenceId"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Uses 2D process-payment with default amount when omitted", "Returns 3DS/OTP states if provider requires them"] },
+      { key: "verify_otp", label: "Verify OTP", operation: "verify_otp", endpoint: "POST /api/providers/quiklie/otp/verify", fields: ["transactionId", "otp"], required: ["transactionId", "otp"], features: ["POST /api/v1/verify-otp"] },
+      { key: "transaction_detail", label: "Transaction Status", operation: "transaction_detail", fields: ["transactionId"], required: ["transactionId"], features: ["GET /api/v1/transaction-status/{paymentId or transactionReferenceId}"] }
     ]
   },
   clover: {
     key: "clover",
     provider: "clover",
     label: "Clover",
-    description: "Clover source-token based eCommerce operations.",
+    description: "Clover eCommerce operations. Verification uses Clover card token verification without creating a charge; Live Check/Auth uses preauthorization.",
     methods: [
-      { key: "verification", label: "Verify", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Tokenizes card with Clover", "No eCommerce preauth is submitted"] },
+      { key: "verification", label: "Card Verification", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Uses Clover tokenization/card verification", "No charge or preauthorization is created", "No amount is submitted"] },
+      { key: "live_check", label: "Live Check / Preauth", operation: "live", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Tokenizes card with Clover", "Creates eCommerce preauthorization", "Approved means Clover accepted an authorization hold"] },
       { key: "auth", label: "Auth / Preauth", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "cvv2", "amount"], features: ["Tokenizes card with Clover", "Creates eCommerce preauthorization"] },
       { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["Voids a Clover preauthorization"] }
     ]
@@ -2836,7 +2941,7 @@ const providerOperationCatalog = {
     label: "PayPal",
     description: "PayPal NVP / Payflow payment operations.",
     methods: [
-      { key: "live_check", label: "Live Check", operation: "live", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Runs DoDirectPayment Authorization", "Use with cardholder authorization", "Void the authorization if you do not intend to capture"] },
+      { key: "live_check", label: "Live Check", operation: "live", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Runs DoDirectPayment Authorization", "Use with cardholder authorization", "Void the authorization if you do not intend to capture"] },
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["DoDirectPayment sale"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold"] },
       { key: "capture", label: "Capture", operation: "capture", fields: ["authorizationPnref", "amount", "captureComplete"], required: ["authorizationPnref", "amount"], features: ["Capture PayPal authorization"] },
@@ -2862,6 +2967,7 @@ function getProviderOperationCatalog() {
 function normalizeProviderKey(provider) {
   const key = String(provider || "").toLowerCase();
   if (key === "propelr") return "propelrpay";
+  if (key === "quikliepay" || key === "quiklie-payment" || key === "quicklie" || key === "quickliepay" || key === "quicklie-payment") return "quiklie";
   if (key === "networkmerchants" || key === "network-merchants") return "nmi";
   if (key === "zohopayments" || key === "zoho-payments" || key === "zoho_payment") return "zoho";
   return key;
@@ -2870,7 +2976,8 @@ function normalizeProviderKey(provider) {
 function requireCloverConfigured(res) {
   const missing = missingEnv([
     ["CLOVER_MERCHANT_ID", env.providers.clover.merchantId],
-    ["CLOVER_API_TOKEN or CLOVER_API_KEY", env.providers.clover.apiKey]
+    ["CLOVER_ECOMM_PUBLIC_TOKEN", env.providers.clover.publicToken],
+    ["CLOVER_ECOMM_PRIVATE_TOKEN", env.providers.clover.apiKey]
   ]);
   if (missing.length > 0) {
     res.status(400).json({
@@ -3417,7 +3524,7 @@ app.post("/api/providers/clover/cards/verify-with-bin", requireAuth, requirePerm
     : {
         ok: false,
         status: "failed",
-        error: verificationResult.reason?.message || "Clover verification failed"
+        error: verificationResult.reason?.message || "Clover tokenization failed"
       };
 
   const binCheck = binResult.status === "fulfilled"
@@ -3500,7 +3607,7 @@ app.post("/api/providers/clover/cards/verify-with-bin", requireAuth, requirePerm
           verification.fraudChecks?.addressZipCheck || verification.fraudChecks?.addressLine1Check || null,
           verification.fraudChecks?.cvcCheck || verification.status,
           verification.cloverChargeId || null,
-          "Clover verify-with-bin",
+          "Clover tokenize-with-bin",
           cardId
         ]
       );
@@ -3510,7 +3617,7 @@ app.post("/api/providers/clover/cards/verify-with-bin", requireAuth, requirePerm
   await writeAuditLog({
     entityType: cardId ? "card" : "provider",
     entityId: cardId || "clover-manual",
-    action: "clover_verify_with_bin",
+    action: "clover_tokenize_with_bin",
     status: verification.status,
     actorUserId: req.user.id,
     details: {
@@ -3558,7 +3665,7 @@ app.post("/api/providers/clover/cards/iframe-verify", requireAuth, requirePermis
     : {
         ok: false,
         status: "failed",
-        error: verificationResult.reason?.message || "Clover token verification failed"
+        error: verificationResult.reason?.message || "Clover source token check failed"
       };
   const binCheck = binResult.status === "fulfilled"
     ? {
@@ -3576,7 +3683,7 @@ app.post("/api/providers/clover/cards/iframe-verify", requireAuth, requirePermis
     payload,
     verificationStatus: verification.ok ? "review" : "declined",
     authResultCode: verification.status,
-    notes: "Clover token-only iframe verification"
+    notes: "Clover token-only iframe source token check"
   });
 
   await query(
@@ -4007,13 +4114,13 @@ app.get("/api/providers/globalpayments/transactions/:transactionId", requireAuth
   res.json(result);
 }));
 
-async function runProviderCardOperation(req, res, { provider, operation }) {
+async function runProviderCardOperation(req, res, { provider, operation, skipBinAttemptLog = false, actionOverride = null } = {}) {
   const operationId = uuidv4();
   const startedAt = new Date().toISOString();
   provider = normalizeProviderKey(provider);
   operation = String(operation || "").toLowerCase();
   try {
-  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "paypal", "braintree", "nmi", "zoho"].includes(provider)) {
+  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "quiklie", "paypal", "braintree", "nmi", "zoho"].includes(provider)) {
     const response = buildOperationResponseModel({
       operationId,
       provider: provider || req.body.provider || null,
@@ -4022,7 +4129,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
       result: {
         status: "failed",
         resultCode: "INVALID_PROVIDER",
-        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, paypal, braintree, nmi or zoho"
+        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, quiklie, paypal, braintree, nmi or zoho"
       },
       request: req.body,
       logs: { audit: false, providerAttempt: false },
@@ -4153,8 +4260,13 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     operation,
     ipAddress: req.ip
   }, savedCard);
+  if (!payload.billingZip && !payload.zip && !payload.postalCode) {
+    payload.billingZip = "00000";
+    payload.zip = "00000";
+    payload.postalCode = "00000";
+  }
   let tokenization = null;
-  if (provider === "clover" && ["verification", "verify", "authorize", "auth"].includes(operation) && !(payload.source || payload.providerPaymentToken || payload.token)) {
+  if (provider === "clover" && ["verification", "verify", "live", "authorize", "auth", "balance"].includes(operation) && !(payload.source || payload.providerPaymentToken || payload.token)) {
     const tokenized = await tokenizeCloverPayload(payload);
     payload = tokenized.payload;
     tokenization = tokenized.tokenization;
@@ -4211,6 +4323,14 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     if (operation === "refund") resultPromise = propelrPayService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = propelrPayService.reverseTransaction(payload);
   }
+  if (provider === "quiklie") {
+    if (operation === "sale" || operation === "charge") resultPromise = quikliePaymentService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = quikliePaymentService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = quikliePaymentService.verifyCard(payload);
+    if (operation === "capture") resultPromise = quikliePaymentService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = quikliePaymentService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = quikliePaymentService.voidTransaction(payload);
+  }
   if (provider === "paypal") {
     if (operation === "sale" || operation === "charge") resultPromise = paypalService.saleCardNvp(payload);
     if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = paypalService.authorizeCardNvp(payload);
@@ -4219,9 +4339,15 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     if (operation === "void" || operation === "reversal") resultPromise = paypalService.voidAuthorizationNvp({ authorizationPnref: payload.transactionId || payload.retref });
   }
   if (provider === "clover") {
-    if (operation === "verification" || operation === "verify" || operation === "live") {
+    if (operation === "verification" || operation === "verify") {
       resultPromise = cloverService.verifyCard({
         source: payload.source || payload.providerPaymentToken || payload.token
+      });
+    } else if (operation === "live") {
+      resultPromise = cloverService.createPreAuthorization({
+        source: payload.source || payload.providerPaymentToken || payload.token,
+        amount: Number(payload.amount || 1),
+        currency: payload.currency || "usd"
       });
     } else if (operation === "authorize" || operation === "auth" || operation === "balance") {
       resultPromise = cloverService.createPreAuthorization({
@@ -4242,7 +4368,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         result: {
           status: "failed",
           resultCode: "UNSUPPORTED_CLOVER_OPERATION",
-          responseMessage: "Clover provider operations currently support verification/authorize/void; refunds stay on the Clover refund form"
+          responseMessage: "Clover provider operations currently support source tokenization/authorize/void; refunds stay on the Clover refund form"
         },
         request: {
           provider,
@@ -4329,7 +4455,8 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         providerReferenceId: result.transactionId || result.cloverChargeId || result.pnref || null,
         avsResult: result.avsResult || result.fraudChecks?.addressZipCheck || result.fraudChecks?.addressLine1Check || result.avsZip || result.avsAddress || null,
         authResultCode: result.authCode || result.cvvResult || result.fraudChecks?.cvcCheck || result.resultCode || result.status || null,
-        notes: operationNotes
+        notes: operationNotes,
+        binCheck
       })
     : null;
   const cardId = persistedCard?.id || requestedCardId || null;
@@ -4356,6 +4483,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
       card: cardLog,
       persistedCard,
       result,
+      binCheck,
       tokenization
     },
     createdByUserId: req.user.id
@@ -4363,7 +4491,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
   const providerAttemptLogged = true;
 
   let binAttemptLogged = false;
-  if (binCheck) {
+  if (binCheck && !skipBinAttemptLog) {
     await query(
       `insert into verification_attempts (
         card_id,
@@ -4399,7 +4527,12 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
         providerAmount: result.amount ?? null
       };
 
-  const responseHttpStatus = operationResult.status === "fulfilled" ? 200 : 502;
+  const providerError = operationResult.status === "rejected" ? operationResult.reason : null;
+  const responseHttpStatus = operationResult.status === "fulfilled"
+    ? 200
+    : providerError?.providerStatus
+      ? 200
+      : 502;
   const responseModel = buildOperationResponseModel({
     operationId,
     provider,
@@ -4433,7 +4566,7 @@ async function runProviderCardOperation(req, res, { provider, operation }) {
     req,
     entityType: cardId ? "card" : "provider",
     entityId: cardId || `${provider}-manual`,
-    action: `${provider}_${operation}`,
+    action: actionOverride || `${provider}_${operation}`,
     status: responseModel.status || "unknown",
     details: {
       operationId,
@@ -4716,6 +4849,62 @@ app.get("/api/providers/zoho/transactions/:transactionId", requireAuth, requireP
   res.json(result);
 }));
 
+function quiklieCardRoute(operation) {
+  return asyncHandler(async (req, res) => {
+    await runProviderCardOperation(req, res, {
+      provider: "quiklie",
+      operation
+    });
+  });
+}
+
+app.get(["/api/providers/quiklie/status", "/api/providers/quicklie/status"], requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json(quikliePaymentService.getStatus());
+}));
+
+app.post(["/api/providers/quiklie/test", "/api/providers/quicklie/test"], requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireQuiklieConfigured(res)) {
+    return;
+  }
+
+  const result = await quikliePaymentService.testConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "quiklie",
+    action: "quiklie_connection_test",
+    status: result.ok ? "success" : result.status || "unknown",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.status(result.ok === false ? 400 : 200).json(result);
+}));
+
+app.post(["/api/providers/quiklie/cards/sale", "/api/providers/quicklie/cards/sale"], requireAuth, requirePermission("canRunAuthCheck"), quiklieCardRoute("sale"));
+app.post(["/api/providers/quiklie/cards/auth", "/api/providers/quicklie/cards/auth"], requireAuth, requirePermission("canRunAuthCheck"), quiklieCardRoute("authorize"));
+app.post(["/api/providers/quiklie/cards/verify", "/api/providers/quicklie/cards/verify"], requireAuth, requirePermission("canRunAuthCheck"), quiklieCardRoute("verification"));
+app.post(["/api/providers/quiklie/otp/verify", "/api/providers/quicklie/otp/verify"], requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  if (!requireQuiklieConfigured(res)) {
+    return;
+  }
+  const result = await quikliePaymentService.verifyOtp(req.body);
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: req.body.transactionId || req.body.paymentId || "quiklie-otp",
+    action: "quiklie_verify_otp",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.json(result);
+}));
+app.get(["/api/providers/quiklie/transactions/:transactionId", "/api/providers/quicklie/transactions/:transactionId"], requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireQuiklieConfigured(res)) {
+    return;
+  }
+  const result = await quikliePaymentService.getTransaction(req.params.transactionId);
+  res.json(result);
+}));
+
 app.get(["/api/providers/propelrpay/status", "/api/providers/propelr/status"], requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
   res.json(propelrPayService.getStatus());
 }));
@@ -4943,6 +5132,16 @@ app.post("/api/provider-operations/cards", requireAuth, requirePermission("canRu
   await runProviderCardOperation(req, res, {
     provider: req.body.provider,
     operation: req.body.operation
+  });
+}));
+
+app.post("/api/checkers/live-checker", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  req.body.runBinCheck = true;
+  await runProviderCardOperation(req, res, {
+    provider: req.body.provider,
+    operation: req.body.operation || "verification",
+    skipBinAttemptLog: true,
+    actionOverride: `${normalizeProviderKey(req.body.provider)}_live_checker`
   });
 }));
 
@@ -5673,11 +5872,26 @@ app.get("/api/provider-reports", requireAuth, requirePermission("canListCards"),
         missing: reportsByKey.propelrpay.missing,
         optionalMissing: reportsByKey.propelrpay.optionalMissing
       },
+      quiklie: {
+        required: ["QUIKLIE_PAYMENT_API_BASE_URL", "QUIKLIE_PAYMENT_API_KEY", "QUIKLIE_PAYMENT_MERCHANT_ID"],
+        recommendedDev: {
+          QUIKLIE_PAYMENT_API_BASE_URL: env.providers.quiklie.baseUrl || "https://api.quiklie.com",
+          QUIKLIE_PAYMENT_MERCHANT_ID: env.providers.quiklie.merchantId ? "configured" : "Merchant Dashboard User ID",
+          QUIKLIE_PAYMENT_STATUS_PATH: env.providers.quiklie.paths.status || "/actuator/health",
+          QUIKLIE_PAYMENT_PROCESS_PATH: env.providers.quiklie.paths.processPayment || "/api/v2/process-payment",
+          QUIKLIE_PAYMENT_TRANSACTION_PATH: env.providers.quiklie.paths.transaction || "/api/v1/transaction-status/:transactionId",
+          QUIKLIE_PAYMENT_VERIFY_OTP_PATH: env.providers.quiklie.paths.verifyOtp || "/api/v1/verify-otp",
+          QUIKLIE_PAYMENT_MID_TYPE: "TWO_D enforced in code"
+        },
+        missing: reportsByKey.quiklie.missing,
+        optionalMissing: reportsByKey.quiklie.optionalMissing
+      },
       clover: {
-        required: ["CLOVER_MERCHANT_ID", "CLOVER_API_TOKEN or CLOVER_API_KEY"],
+        required: ["CLOVER_MERCHANT_ID", "CLOVER_ECOMM_PUBLIC_TOKEN", "CLOVER_ECOMM_PRIVATE_TOKEN"],
         recommendedDev: {
           CLOVER_API_BASE_URL: env.providers.clover.baseUrl || "https://api.clover.com",
-          CLOVER_API_TOKEN: "live eCommerce API token"
+          CLOVER_ECOMM_PUBLIC_TOKEN: env.providers.clover.publicToken ? "configured" : "missing",
+          CLOVER_ECOMM_PRIVATE_TOKEN: env.providers.clover.apiKey ? "configured" : "missing"
         },
         missing: reportsByKey.clover.missing
       }
@@ -6345,8 +6559,8 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
     return sendApiError(res, req, 400, "provider, providerPaymentToken, last4, expMonth and expYear are required", "VALIDATION_ERROR");
   }
 
-  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, braintree, nmi or zoho", "INVALID_PROVIDER");
+  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
   }
 
   let verifyPayload = { ...req.body, provider, amount: req.body.amount || 1, currency: req.body.currency || "USD", ipAddress: req.ip };
@@ -6356,6 +6570,7 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
   else if (provider === "nmi") verificationPromise = nmiService.verifyCard(verifyPayload);
   else if (provider === "zoho") verificationPromise = zohoPaymentsService.verifyCard(verifyPayload);
   else if (provider === "propelr" || provider === "propelrpay") verificationPromise = propelrPayService.verifyCard(verifyPayload);
+  else if (provider === "quiklie") verificationPromise = quikliePaymentService.verifyCard(verifyPayload);
   else if (provider === "paypal") verificationPromise = paypalService.liveCheckCard(verifyPayload);
   else if (provider === "clover") {
     verificationPromise = tokenizeCloverPayload(verifyPayload).then(t => cloverService.verifyCard({ source: t.payload.source }));
@@ -6586,8 +6801,8 @@ app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermiss
     notes
   } = req.body;
 
-  if (!provider || !["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "braintree", "nmi", "zoho"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, braintree, nmi or zoho", "INVALID_PROVIDER");
+  if (!provider || !["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
   }
 
   if (!verificationStatus || !["pending", "verified", "declined", "review"].includes(verificationStatus)) {

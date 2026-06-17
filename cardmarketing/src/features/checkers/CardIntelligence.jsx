@@ -1,5 +1,5 @@
 import { Details, ResultCard } from '../../components/common/Details'
-import { pickDetail, statusClass } from '../../utils/format'
+import { displayStatus, operationResponseMessage, pickDetail, statusClass } from '../../utils/format'
 
 function displayValue(value) {
   if (value === null || value === undefined || value === '' || value === 'API Only') return '-'
@@ -56,8 +56,10 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
             <small>{live.card?.first6 || result?.bin || '-'} / {live.card?.last4 || '-'}</small>
           </div>
           <div className="summary">
-            <div><span>Live Status</span><strong>{live.status || '-'}</strong></div>
-            <div><span>Provider Message</span><strong>{live.responseMessage || '-'}</strong></div>
+            <div><span>Live Status</span><strong>{displayStatus(live.status)}</strong></div>
+            <div><span>Provider Message</span><strong>{operationResponseMessage(live) || '-'}</strong></div>
+            <div><span>Failure Reason</span><strong>{live.failureReason || '-'}</strong></div>
+            <div><span>Provider Status</span><strong>{live.result?.providerStatus || live.providerStatus || '-'}</strong></div>
             <div><span>PNREF</span><strong>{live.pnref || live.result?.transactionId || live.result?.cloverChargeId || live.result?.pnref || '-'}</strong></div>
             <div><span>Auth Code</span><strong>{live.authCode || live.result?.authCode || '-'}</strong></div>
             <div><span>AVS</span><strong>{live.avsZip || live.avsAddress || live.result?.avsResult || live.result?.avsZip || '-'}</strong></div>

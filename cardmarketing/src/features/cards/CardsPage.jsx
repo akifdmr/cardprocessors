@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { PaginationControls, usePagination } from '../../components/common/Pagination'
 import { formatCardLabel, formatMoneyInput, moneyValue, statusClass } from '../../utils/format'
@@ -37,8 +37,23 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
   const [enrollment, setEnrollment] = useState(null)
   const [actionPrompt, setActionPrompt] = useState(null)
   const [catalog, setCatalog] = useState(null)
+  const [search, setSearch] = useState('')
   const withLoader = runAction || ((task) => task())
-  const cardPagination = usePagination(cards, 25)
+  const filteredCards = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    if (!needle) return cards
+    return cards.filter((card) => [
+      formatCardLabel(card),
+      card.cardholder_name,
+      card.provider,
+      card.id,
+      card.first6,
+      card.last4,
+      card.exp_month,
+      card.exp_year,
+    ].filter(Boolean).join(' ').toLowerCase().includes(needle))
+  }, [cards, search])
+  const cardPagination = usePagination(filteredCards, 25)
 
   useEffect(() => {
     api('/provider-operations/catalog').then(setCatalog).catch(console.error)
@@ -247,6 +262,12 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
         </div>
         <PaginationControls pagination={cardPagination} />
       </div>
+      <div className="table-toolbar">
+        <label>
+          <span>Search</span>
+          <input value={search} placeholder="Card, holder, provider, first6, last4..." onChange={(event) => setSearch(event.target.value)} />
+        </label>
+      </div>
       <div className="table-wrap">
         <table className="processor-table">
           <thead>
@@ -282,7 +303,9 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
           </tbody>
         </table>
       </div>
+      <PaginationControls pagination={cardPagination} />
       {!cards.length ? <article className="card">Kayıtlı kart yok.</article> : null}
+      {cards.length && !filteredCards.length ? <article className="card">Bu aramayla eşleşen kart yok.</article> : null}
       {modal ? <JsonModal title={modal.title} value={modal.value} onClose={() => setModal(null)} /> : null}
       {actionPrompt ? (
         <div className="modal-overlay" role="presentation" onClick={() => setActionPrompt(null)}>
@@ -319,6 +342,7 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
                         <option value="fluidpay">FluidPay</option>
                         <option value="globalpayments">Global Payments</option>
                         <option value="propelrpay">PropelrPay</option>
+                        <option value="quiklie">Quiklie Payment</option>
                         <option value="braintree">Braintree</option>
                       </>
                   )}

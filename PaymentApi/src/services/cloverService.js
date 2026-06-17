@@ -18,7 +18,7 @@ function getCloverConfig() {
     throw new Error("Missing CLOVER_MERCHANT_ID");
   }
   if (!config.apiKey) {
-    throw new Error("Missing CLOVER_API_TOKEN or CLOVER_API_KEY");
+    throw new Error("Missing CLOVER_ECOMM_PRIVATE_TOKEN");
   }
   return config;
 }
@@ -26,7 +26,7 @@ function getCloverConfig() {
 function getPublicCloverConfig() {
   const config = getProviderConfig("clover");
   if (!config.publicToken) {
-    throw new Error("Missing CLOVER_PUBLIC_TOKEN");
+    throw new Error("Missing CLOVER_ECOMM_PUBLIC_TOKEN");
   }
   return config;
 }
@@ -56,17 +56,39 @@ function normalizeExpiry(payload = {}) {
 function cloverProviderError(error, fallbackMessage) {
   if (!error?.isAxiosError) return error;
   const providerData = error.response?.data;
+  const providerError = providerData?.error || {};
+  const declineCode = providerError.declineCode || providerError.decline_code || null;
+  const providerStatus = error.response?.status || null;
+  const isCardDeclined = providerError.code === "card_declined" || declineCode || providerStatus === 402;
+  const isUnauthorized = providerStatus === 401 || providerData?.message === "401 Unauthorized";
   const providerMessage = typeof providerData === "string"
     ? providerData
     : providerData?.message ||
       providerData?.error?.message ||
       providerData?.error?.code ||
       (Array.isArray(providerData?.errors) ? providerData.errors[0]?.detail || providerData.errors[0]?.message : null);
-  const next = new Error(providerMessage ? `${fallbackMessage}: ${providerMessage}` : fallbackMessage);
-  next.statusCode = error.response?.status === 400 ? 400 : 502;
-  next.resultCode = error.response?.status === 400 ? "CLOVER_BAD_REQUEST" : "CLOVER_PROVIDER_ERROR";
-  next.providerStatus = error.response?.status || null;
+  let message = providerMessage ? `${fallbackMessage}: ${providerMessage}` : fallbackMessage;
+  let resultCode = providerStatus === 400 ? "CLOVER_BAD_REQUEST" : "CLOVER_PROVIDER_ERROR";
+  let statusCode = providerStatus === 400 ? 400 : 502;
+  let operationStatus = "failed";
+
+  if (isCardDeclined) {
+    operationStatus = "declined";
+    statusCode = 402;
+    resultCode = declineCode ? `CLOVER_${String(declineCode).toUpperCase()}` : "CLOVER_CARD_DECLINED";
+    message = `Clover kartı reddetti${declineCode ? ` (${declineCode})` : ""}. Karttan ödeme alınabilir görünmüyor.`;
+  } else if (isUnauthorized) {
+    resultCode = "CLOVER_ECOMMERCE_UNAUTHORIZED";
+    message = "Clover eCommerce yetkisi reddedildi. CLOVER_ECOMM_PUBLIC_TOKEN ve CLOVER_ECOMM_PRIVATE_TOKEN aynı live merchant hesabına ait olmalı.";
+  }
+
+  const next = new Error(message);
+  next.statusCode = statusCode;
+  next.resultCode = resultCode;
+  next.operationStatus = operationStatus;
+  next.providerStatus = providerStatus;
   next.providerData = providerData || null;
+  next.providerMessage = providerMessage || null;
   return next;
 }
 
@@ -143,8 +165,8 @@ function getIframeConfig() {
   const config = getProviderConfig("clover");
   const missing = [];
   if (!config.merchantId) missing.push("CLOVER_MERCHANT_ID");
-  if (!config.publicToken) missing.push("CLOVER_PUBLIC_TOKEN");
-  if (!config.apiKey) missing.push("CLOVER_API_TOKEN");
+  if (!config.publicToken) missing.push("CLOVER_ECOMM_PUBLIC_TOKEN");
+  if (!config.apiKey) missing.push("CLOVER_ECOMM_PRIVATE_TOKEN");
 
   return {
     configured: missing.length === 0,
@@ -220,24 +242,28 @@ async function createCharge({ source, amount, currency = "usd" }) {
   if (!source) throw new Error("source is required");
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("amount must be a positive integer in cents");
 
-  const response = await axios.post(
-    `${getEcommerceBaseUrl()}/v1/charges`,
-    {
-      source,
-      amount,
-      currency: String(currency).toLowerCase(),
-      capture: true            // hemen yakala (charge)
-    },
-    {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${config.apiKey}`,
-        "content-type": "application/json"
+  try {
+    const response = await axios.post(
+      `${getEcommerceBaseUrl()}/v1/charges`,
+      {
+        source,
+        amount,
+        currency: String(currency).toLowerCase(),
+        capture: true            // hemen yakala (charge)
       },
-      timeout: 15000
-    }
-  );
-  return response.data;
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${config.apiKey}`,
+          "content-type": "application/json"
+        },
+        timeout: 15000
+      }
+    );
+    return response.data;
+  } catch (error) {
+    throw cloverProviderError(error, "Clover charge failed");
+  }
 }
 
 async function testPlatformConnection() {
@@ -266,18 +292,23 @@ async function createPreAuthorization({ source, amount, currency = "usd" }) {
   if (!source) throw new Error("source is required");
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("amount must be a positive integer in cents");
 
-  const response = await axios.post(
-    `${getEcommerceBaseUrl()}/v1/charges`,
-    { source, amount, currency: String(currency).toLowerCase(), capture: false },
-    {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${config.apiKey}`,
-        "content-type": "application/json"
-      },
-      timeout: 15000
-    }
-  );
+  let response;
+  try {
+    response = await axios.post(
+      `${getEcommerceBaseUrl()}/v1/charges`,
+      { source, amount, currency: String(currency).toLowerCase(), capture: false },
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${config.apiKey}`,
+          "content-type": "application/json"
+        },
+        timeout: 15000
+      }
+    );
+  } catch (error) {
+    throw cloverProviderError(error, "Clover preauthorization failed");
+  }
   const charge = response.data || {};
   return {
     ...charge,
@@ -333,12 +364,23 @@ function normalizeFraudChecks(charge) {
 async function verifyCard({ source }) {
   getCloverConfig(); // sadece config var mı kontrolü
   if (!source) throw new Error("source is required");
+  const tokenized = String(source).startsWith("clv_");
   return {
-    status: String(source).startsWith("clv_") ? "token_ready" : "review",
-    verificationMode: "token_only",
-    submittedToClover: false,
+    status: tokenized ? "verified" : "review",
+    resultCode: tokenized ? "CLOVER_CARD_VERIFIED" : "CLOVER_TOKEN_REVIEW",
+    verificationMode: "clover_card_verification",
+    submittedToClover: tokenized,
+    tokenizationSubmittedToClover: tokenized,
+    chargeCreated: false,
+    preauthorizationCreated: false,
+    amount: 0,
     sourceToken: `${String(source).slice(0, 6)}...${String(source).slice(-4)}`,
-    message: "Preauth is disabled for verification. Use Clover tokenization to create the source token; authorize/preauth is a separate operation.",
+    responseMessage: tokenized
+      ? "Clover card verification tamamlandı. Charge/preauth oluşturulmadı ve karttan tutar alınmadı."
+      : "Clover source token gözden geçirilmeli. Charge/preauth oluşturulmadı.",
+    message: tokenized
+      ? "Clover card verification tamamlandı. Charge/preauth oluşturulmadı ve karttan tutar alınmadı."
+      : "Clover source token gözden geçirilmeli. Charge/preauth oluşturulmadı.",
     fraudChecks: { cvcCheck: null, addressLine1Check: null, addressZipCheck: null }
   };
 }

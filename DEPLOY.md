@@ -63,11 +63,11 @@ Other supported providers keep their existing env names from `PaymentApi/src/con
 After deploy, open:
 
 ```text
-https://YOUR-SERVICE.onrender.com/react/
+https://cardprocessors.onrender.com/react/
 ```
 
 Health check:
 
 ```text
-https://YOUR-SERVICE.onrender.com/health
+https://cardprocessors.onrender.com/health
 ```

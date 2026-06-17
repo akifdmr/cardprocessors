@@ -110,6 +110,14 @@ function getPublicProviderConfig() {
       operationPathsConfigured: Object.fromEntries(
         Object.entries(env.providers.propelrpay.paths || {}).map(([key, value]) => [key, Boolean(value)])
       )
+    },
+    quiklie: {
+      baseUrl: env.providers.quiklie.baseUrl || null,
+      merchantConfigured: Boolean(env.providers.quiklie.merchantId),
+      configured: Boolean(env.providers.quiklie.baseUrl && env.providers.quiklie.apiKey),
+      operationPathsConfigured: Object.fromEntries(
+        Object.entries(env.providers.quiklie.paths || {}).map(([key, value]) => [key, Boolean(value)])
+      )
     }
   };
 }

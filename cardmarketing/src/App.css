@@ -29,6 +29,26 @@ h1, h2, h3, h4, p { margin: 0; }
 .panel, .card { padding: 18px; }
 .wide { width: 100%; }
 .page-stack { display: grid; gap: 18px; }
+.checker-standard { display: block; }
+.checker-live-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.82fr) minmax(420px, 1.18fr);
+  gap: 18px;
+  align-items: start;
+}
+.checker-input-panel,
+.checker-result-column {
+  min-width: 0;
+}
+.checker-result-column {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 14px;
+}
+.checker-empty-result {
+  min-height: 220px;
+}
 .topbar, .nav, .identity, .section-head, .result-head, .processor-heading, .row-actions, .tabs, .pagination-controls {
   display: flex;
   align-items: center;
@@ -66,6 +86,19 @@ button.active, .primary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(152, 176, 164, 0.16);
+  border-radius: 8px;
+  background: rgba(3, 7, 6, 0.52);
+}
+.segmented button {
+  min-height: 34px;
+  border-radius: 6px;
 }
 .processor-filter { grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; }
 .pagination-controls { justify-content: flex-end; flex-wrap: wrap; }
@@ -223,6 +256,18 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
   background: #030706;
   border-radius: 8px;
   padding: 12px;
+}
+
+.bulk-live-output {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre;
+  color: #b8ffd8;
+  background: #030706;
+  border: 1px solid rgba(152, 176, 164, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  line-height: 1.7;
 }
 
 .live-card-visual {
@@ -710,6 +755,8 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
 
 /* Responsive İyileştirmeler */
 @media (max-width: 900px) {
+  .checker-live-grid { grid-template-columns: 1fr; }
+  .checker-result-column { position: static; }
   .form-grid, .card-input-component, .processor-filter, .summary, .details { grid-template-columns: 1fr; }
   .debt-grid { grid-template-columns: 1fr; }
   .live-card-visual { grid-template-columns: 1fr; }

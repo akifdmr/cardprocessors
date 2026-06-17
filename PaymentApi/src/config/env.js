@@ -129,8 +129,8 @@ module.exports = {
       tokenBaseUrl: optionalEnv("CLOVER_TOKEN_API") || optionalEnv("CLOVER_TOKEN_API_BASE_URL", "https://token.clover.com"),
       ecommerceBaseUrl: optionalEnv("CLOVER_ECOMMERCE_API") || optionalEnv("CLOVER_ECOMMERCE_API_BASE_URL", "https://scl.clover.com"),
       merchantId: optionalEnv("CLOVER_MERCHANT_ID"),
-      publicToken: optionalEnv("CLOVER_PUBLIC_TOKEN"),
-      apiKey: optionalEnv("CLOVER_API_TOKEN") || optionalEnv("CLOVER_API_KEY") || optionalEnv("CLOVER_PRIVATE_TOKEN") || optionalEnv("CLOVER_ACCESS_TOKEN")
+      publicToken: optionalEnv("CLOVER_ECOMM_PUBLIC_TOKEN"),
+      apiKey: optionalEnv("CLOVER_ECOMM_PRIVATE_TOKEN")
     },
     paypal: {
       baseUrl: optionalEnv("PAYPAL_API_BASE_URL", "https://api-m.paypal.com"),
@@ -257,6 +257,27 @@ module.exports = {
         refund: optionalEnv("PROPELRPAY_REFUND_PATH") || optionalEnv("PROPELR_REFUND_PATH"),
         void: optionalEnv("PROPELRPAY_VOID_PATH") || optionalEnv("PROPELR_VOID_PATH"),
         transaction: optionalEnv("PROPELRPAY_TRANSACTION_PATH") || optionalEnv("PROPELR_TRANSACTION_PATH")
+      }
+    },
+    quiklie: {
+      baseUrl: optionalEnv("QUIKLIE_PAYMENT_API_BASE_URL") || optionalEnv("QUIKLIE_API_BASE_URL") || optionalEnv("QUICKLIE_PAYMENT_API_BASE_URL") || optionalEnv("QUICKLIE_API_BASE_URL"),
+      apiKey: optionalEnv("QUIKLIE_PAYMENT_API_KEY") || optionalEnv("QUIKLIE_API_KEY") || optionalEnv("QUICKLIE_PAYMENT_API_KEY") || optionalEnv("QUICKLIE_API_KEY"),
+      merchantId: optionalEnv("QUIKLIE_PAYMENT_MERCHANT_ID") || optionalEnv("QUIKLIE_PAYMENT_USER_ID") || optionalEnv("QUIKLIE_MERCHANT_ID") || optionalEnv("QUIKLIE_USER_ID") || optionalEnv("QUICKLIE_PAYMENT_MERCHANT_ID") || optionalEnv("QUICKLIE_PAYMENT_USER_ID") || optionalEnv("QUICKLIE_MERCHANT_ID") || optionalEnv("QUICKLIE_USER_ID"),
+      authHeader: optionalEnv("QUIKLIE_PAYMENT_AUTH_HEADER") || optionalEnv("QUIKLIE_AUTH_HEADER") || optionalEnv("QUICKLIE_PAYMENT_AUTH_HEADER") || optionalEnv("QUICKLIE_AUTH_HEADER", "x-api-key"),
+      authScheme: optionalEnv("QUIKLIE_PAYMENT_AUTH_SCHEME") || optionalEnv("QUIKLIE_AUTH_SCHEME") || optionalEnv("QUICKLIE_PAYMENT_AUTH_SCHEME") || optionalEnv("QUICKLIE_AUTH_SCHEME", ""),
+      timeoutMs: Number(optionalEnv("QUIKLIE_PAYMENT_TIMEOUT_MS") || optionalEnv("QUIKLIE_TIMEOUT_MS") || optionalEnv("QUICKLIE_PAYMENT_TIMEOUT_MS") || optionalEnv("QUICKLIE_TIMEOUT_MS", "180000")),
+      paths: {
+        status: optionalEnv("QUIKLIE_PAYMENT_STATUS_PATH") || optionalEnv("QUIKLIE_STATUS_PATH") || optionalEnv("QUICKLIE_PAYMENT_STATUS_PATH") || optionalEnv("QUICKLIE_STATUS_PATH", "/actuator/health"),
+        test: optionalEnv("QUIKLIE_PAYMENT_TEST_PATH") || optionalEnv("QUIKLIE_TEST_PATH") || optionalEnv("QUICKLIE_PAYMENT_TEST_PATH") || optionalEnv("QUICKLIE_TEST_PATH"),
+        processPayment: optionalEnv("QUIKLIE_PAYMENT_PROCESS_PATH") || optionalEnv("QUIKLIE_PROCESS_PAYMENT_PATH") || optionalEnv("QUICKLIE_PAYMENT_PROCESS_PATH") || optionalEnv("QUICKLIE_PROCESS_PAYMENT_PATH", "/api/v2/process-payment"),
+        sale: optionalEnv("QUIKLIE_PAYMENT_SALE_PATH") || optionalEnv("QUIKLIE_SALE_PATH") || optionalEnv("QUICKLIE_PAYMENT_SALE_PATH") || optionalEnv("QUICKLIE_SALE_PATH", "/api/v2/process-payment"),
+        authorize: optionalEnv("QUIKLIE_PAYMENT_AUTH_PATH") || optionalEnv("QUIKLIE_AUTH_PATH") || optionalEnv("QUICKLIE_PAYMENT_AUTH_PATH") || optionalEnv("QUICKLIE_AUTH_PATH", "/api/v2/process-payment"),
+        verification: optionalEnv("QUIKLIE_PAYMENT_VERIFY_PATH") || optionalEnv("QUIKLIE_VERIFY_PATH") || optionalEnv("QUICKLIE_PAYMENT_VERIFY_PATH") || optionalEnv("QUICKLIE_VERIFY_PATH", "/api/v2/process-payment"),
+        capture: optionalEnv("QUIKLIE_PAYMENT_CAPTURE_PATH") || optionalEnv("QUIKLIE_CAPTURE_PATH") || optionalEnv("QUICKLIE_PAYMENT_CAPTURE_PATH") || optionalEnv("QUICKLIE_CAPTURE_PATH"),
+        refund: optionalEnv("QUIKLIE_PAYMENT_REFUND_PATH") || optionalEnv("QUIKLIE_REFUND_PATH") || optionalEnv("QUICKLIE_PAYMENT_REFUND_PATH") || optionalEnv("QUICKLIE_REFUND_PATH"),
+        void: optionalEnv("QUIKLIE_PAYMENT_VOID_PATH") || optionalEnv("QUIKLIE_VOID_PATH") || optionalEnv("QUICKLIE_PAYMENT_VOID_PATH") || optionalEnv("QUICKLIE_VOID_PATH"),
+        transaction: optionalEnv("QUIKLIE_PAYMENT_TRANSACTION_PATH") || optionalEnv("QUIKLIE_TRANSACTION_PATH") || optionalEnv("QUICKLIE_PAYMENT_TRANSACTION_PATH") || optionalEnv("QUICKLIE_TRANSACTION_PATH", "/api/v1/transaction-status/:transactionId"),
+        verifyOtp: optionalEnv("QUIKLIE_PAYMENT_VERIFY_OTP_PATH") || optionalEnv("QUIKLIE_VERIFY_OTP_PATH") || optionalEnv("QUICKLIE_PAYMENT_VERIFY_OTP_PATH") || optionalEnv("QUICKLIE_VERIFY_OTP_PATH", "/api/v1/verify-otp")
       }
     },
     deepseeker: {

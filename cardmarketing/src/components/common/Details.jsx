@@ -1,4 +1,4 @@
-import { detailValue, statusClass } from '../../utils/format'
+import { detailValue, displayStatus, statusClass } from '../../utils/format'
 
 export function Details({ items = {} }) {
   return (
@@ -18,7 +18,7 @@ export function ResultCard({ title, status, message, items }) {
     <article className={`card result ${statusClass(status)}`}>
       <div className="result-head">
         <strong>{title}</strong>
-        <span className={`pill ${statusClass(status)}`}>{status || '-'}</span>
+        <span className={`pill ${statusClass(status)}`}>{displayStatus(status)}</span>
       </div>
       {message ? <p>{message}</p> : null}
       <Details items={items} />

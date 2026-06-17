@@ -1,6 +1,6 @@
 import { normalizeProviderKey } from './processorActions'
 
-const supportedRowActionProviders = new Set(['propelrpay', 'fluidpay', 'globalpayments', 'paypal', 'braintree', 'nmi', 'zoho', 'clover'])
+const supportedRowActionProviders = new Set(['propelrpay', 'fluidpay', 'globalpayments', 'paypal', 'braintree', 'nmi', 'zoho', 'quiklie', 'clover'])
 
 export const processorActionConfigs = {
   void: {

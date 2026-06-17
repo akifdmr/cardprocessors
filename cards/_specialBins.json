@@ -3,19 +3,19 @@
     "bank": "U.S. BANK NATIONAL ASSOCIATION",
     "country_code": "US",
     "card_level": "TRADITIONAL",
-    "security_level": "Akıllı 3D (Risk Bazlı)",
+    "security_level": "Akilli 3D (Risk Bazli)",
     "type": "CREDIT",
     "bin": "414778",
-    "description": "ABD içinde Non-3D geçebilir, EU ve yüksek riskli işlemlerde 3D zorunlu."
+    "description": "ABD icinde Non-3D gecebilir, EU ve yuksek riskli islemlerde 3D zorunlu."
   },
   {
     "bank": "CHASE BANK USA",
     "country_code": "US",
     "card_level": "SIGNATURE",
-    "security_level": "Akıllı 3D (Risk Bazlı) - Yüksek Güvenlik",
+    "security_level": "Akilli 3D (Risk Bazli) - Yuksek Guvenlik",
     "type": "CREDIT",
     "bin": "414720",
-    "description": "Premium kart; düşük riskte frictionless, yüksek riskte challenge ister."
+    "description": "Premium kart; dusuk riskte frictionless, yuksek riskte challenge ister."
   },
 {
   "bank": "NATIONWIDE BUILDING SOCIETY",
@@ -25,122 +25,122 @@
   "type": "CREDIT",
   "bin": "489396",
   "description": "Premium Platinum credit card; uses risk-based 3-D Secure (CA Risk Analytics) - low-risk transactions are frictionless, high-risk transactions trigger challenge authentication."
-}
-  {
+},
+{
     "bank": "CHASE BANK USA",
     "country_code": "US",
     "card_level": "INFINITE",
-    "security_level": "Zorunlu 3D (SCA) - En Yüksek Güvenlik",
+    "security_level": "Zorunlu 3D (SCA) - En Yuksek Guvenlik",
     "type": "CREDIT",
     "bin": "431311",
-    "description": "En üst segment; kritik işlemlerde neredeyse kesin 3D ister."
+    "description": "En ust segment; kritik islemlerde neredeyse kesin 3D ister."
   },
   {
     "bank": "CITIBANK N.A.",
     "country_code": "US",
     "card_level": "WORLD ELITE",
-    "security_level": "Kesinlikle 3D Geçer - Yüksek Güvenlik",
+    "security_level": "Kesinlikle 3D Gecer - Yuksek Guvenlik",
     "type": "CREDIT",
     "bin": "552287",
-    "description": "Non-3D işlemlere kapalıdır; her online işlem 3D korumasındadır."
+    "description": "Non-3D islemlere kapalidir; her online islem 3D korumasindadir."
   },
   {
     "bank": "BANK OF AMERICA N.A.",
     "country_code": "US",
     "card_level": "SIGNATURE",
-    "security_level": "Akıllı 3D (Risk Bazlı)",
+    "security_level": "Akilli 3D (Risk Bazli)",
     "type": "CREDIT",
     "bin": "410443",
-    "description": "Risk bazlı auth ile low-risk işlemlerde ek şifre istemez."
+    "description": "Risk bazli auth ile low-risk islemlerde ek sifre istemez."
   },
   {
     "bank": "CAPITAL ONE BANK",
     "country_code": "US",
     "card_level": "WORLD ELITE",
-    "security_level": "Kesinlikle 3D Geçer - Yüksek Güvenlik",
+    "security_level": "Kesinlikle 3D Gecer - Yuksek Guvenlik",
     "type": "CREDIT",
     "bin": "517805",
-    "description": "Venture X gibi kartlar non-3D işlemlere izin vermez."
+    "description": "Venture X gibi kartlar non-3D islemlere izin vermez."
   },
   {
     "bank": "AMERICAN EXPRESS",
     "country_code": "US",
     "card_level": "PLATINUM",
-    "security_level": "Kesinlikle 3D Geçer (SafeKey) - En Yüksek",
+    "security_level": "Kesinlikle 3D Gecer (SafeKey) - En Yuksek",
     "type": "CREDIT",
     "bin": "376358",
-    "description": "Amex SafeKey ile tüm online işlemlerde 3D arar; liability shift sağlar[citation:9]."
+    "description": "Amex SafeKey ile tum online islemlerde 3D arar; liability shift sağlar[citation:9]."
   },
   {
     "bank": "AMERICAN EXPRESS",
     "country_code": "US",
     "card_level": "BLACK",
-    "security_level": "Kesinlikle 3D Geçer (SafeKey) + Özel Güvenlik",
+    "security_level": "Kesinlikle 3D Gecer (SafeKey) + Özel Guvenlik",
     "type": "CREDIT",
     "bin": "376196",
-    "description": "Centurion; standart 3D'nin ötesinde ek koruma katmanları bulunur."
+    "description": "Centurion; standart 3D'nin ötesinde ek koruma katmanlari bulunur."
   },
   {
     "bank": "HSBC UK BANK",
     "country_code": "GB",
     "card_level": "SIGNATURE",
-    "security_level": "Zorunlu 3D (SCA) - En Yüksek",
+    "security_level": "Zorunlu 3D (SCA) - En Yuksek",
     "type": "CREDIT",
     "bin": "448099",
-    "description": "BK ve EU'da PSD2 zorunluluğu ile tüm online işlemler 3D gerektirir[citation:4]."
+    "description": "BK ve EU'da PSD2 zorunluluğu ile tum online islemler 3D gerektirir[citation:4]."
   },
   {
     "bank": "BARCLAYS BANK UK",
     "country_code": "GB",
     "card_level": "WORLD ELITE",
-    "security_level": "Zorunlu 3D (SCA) - En Yüksek",
+    "security_level": "Zorunlu 3D (SCA) - En Yuksek",
     "type": "CREDIT",
     "bin": "535251",
-    "description": "EU pazarı için 3D Secure zorunlu; yüksek limitte dahi geçerlidir."
+    "description": "EU pazari icin 3D Secure zorunlu; yuksek limitte dahi gecerlidir."
   },
   {
     "bank": "BNP PARIBAS",
     "country_code": "FR",
     "card_level": "PLATINUM",
-    "security_level": "Zorunlu 3D (SCA) - En Yüksek",
+    "security_level": "Zorunlu 3D (SCA) - En Yuksek",
     "type": "CREDIT",
     "bin": "497071",
-    "description": "Fransa ve EU'da 3D Secure authentication olmadan işlem tamamlanmaz."
+    "description": "Fransa ve EU'da 3D Secure authentication olmadan islem tamamlanmaz."
   },
   {
     "bank": "ROYAL BANK OF CANADA",
     "country_code": "CA",
     "card_level": "WORLD ELITE",
-    "security_level": "Akıllı 3D (Risk Bazlı)",
+    "security_level": "Akilli 3D (Risk Bazli)",
     "type": "CREDIT",
     "bin": "451805",
-    "description": "Avion Visa Infinite; risk bazlı auth ile kullanıcı deneyimi optimize edilmiştir."
+    "description": "Avion Visa Infinite; risk bazli auth ile kullanici deneyimi optimize edilmistir."
   },
   {
     "bank": "TURKIYE IS BANKASI",
     "country_code": "TR",
     "card_level": "PLATINUM",
-    "security_level": "Akıllı 3D / Zorunlu 3D (Karma)",
+    "security_level": "Akilli 3D / Zorunlu 3D (Karma)",
     "type": "CREDIT",
     "bin": "454805",
-    "description": "Türkiye'de 3D zorunluluğu vardır; yurt dışı işlemlerde de sıklıkla 3D ister."
+    "description": "Turkiye'de 3D zorunluluğu vardir; yurt disi islemlerde de siklikla 3D ister."
   },
   {
     "bank": "DBS BANK",
     "country_code": "SG",
     "card_level": "SIGNATURE",
-    "security_level": "Akıllı 3D (Risk Bazlı)",
+    "security_level": "Akilli 3D (Risk Bazli)",
     "type": "CREDIT",
     "bin": "468594",
-    "description": "Singapur; 3DS 2.0 ile risk bazlı authentication kullanır."
+    "description": "Singapur; 3DS 2.0 ile risk bazli authentication kullanir."
   },
   {
     "bank": "HDFC BANK",
     "country_code": "IN",
     "card_level": "INFINITE",
-    "security_level": "Zorunlu 3D - Yüksek Güvenlik",
+    "security_level": "Zorunlu 3D - Yuksek Guvenlik",
     "type": "CREDIT",
     "bin": "434081",
-    "description": "Hindistan'da RBI düzenlemeleri ile online işlemlerde zorunlu 2FA (3D) bulunur."
+    "description": "Hindistan'da RBI duzenlemeleri ile online islemlerde zorunlu 2FA (3D) bulunur."
   }
 ]
