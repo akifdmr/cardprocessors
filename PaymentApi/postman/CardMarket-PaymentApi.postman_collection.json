@@ -1,0 +1,260 @@
+{
+  "info": {
+    "_postman_id": "cc56b990-1719-4e58-bd72-cardmarket-api",
+    "name": "CardMarket PaymentApi",
+    "description": "CardMarket API requests using application username/password credentials through HTTP Basic authentication. No API token or login request is required.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      { "key": "username", "value": "{{username}}", "type": "string" },
+      { "key": "password", "value": "{{password}}", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.request.headers.upsert({ key: 'Accept', value: 'application/json' });"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3103" },
+    { "key": "username", "value": "admin" },
+    { "key": "password", "value": "" },
+    { "key": "cardId", "value": "" },
+    { "key": "transactionId", "value": "" },
+    { "key": "provider", "value": "clover" }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health",
+          "auth": { "type": "noauth" },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "OpenAPI JSON",
+          "auth": { "type": "noauth" },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/openapi.json"
+          }
+        },
+        {
+          "name": "Download Postman Collection",
+          "auth": { "type": "noauth" },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/meta/postman/collection"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "auth": { "type": "noauth" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.user).to.be.an('object');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cards",
+      "item": [
+        {
+          "name": "List Cards",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const rows = pm.response.json();",
+                  "  if (Array.isArray(rows) && rows[0]?.id) pm.collectionVariables.set('cardId', rows[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cards"
+          }
+        },
+        {
+          "name": "Card Check History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cards/{{cardId}}/checks"
+          }
+        },
+        {
+          "name": "Validate Card Input",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4111111111111111\",\n  \"expMonth\": \"12\",\n  \"expYear\": \"2030\",\n  \"cardholderName\": \"Sandbox User\",\n  \"billingZip\": \"00000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/cards/validate-input"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Processors",
+      "item": [
+        {
+          "name": "Operation Catalog",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/provider-operations/catalog"
+          }
+        },
+        {
+          "name": "Processor Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/payment-processors/health"
+          }
+        },
+        {
+          "name": "Run Processor Health Check",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/payment-processors/health/check"
+          }
+        },
+        {
+          "name": "Processor Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/payment-processors/logs?processor=&attemptType=&status=&limit=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "payment-processors", "logs"],
+              "query": [
+                { "key": "processor", "value": "" },
+                { "key": "attemptType", "value": "" },
+                { "key": "status", "value": "" },
+                { "key": "limit", "value": "100" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generic Provider Operation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"operation\": \"transaction_detail\",\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/provider-operations/cards"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unified PayPal + Braintree",
+      "item": [
+        {
+          "name": "Single Token Auth + Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify"
+          }
+        },
+        {
+          "name": "Batch Token Auth + Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardIds\": [\"{{cardId}}\"],\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -192,21 +192,25 @@ export function CheckedCardsPage({ runAction }) {
     }
   }
 
-  async function runAmazonPayAction(card, operation, payload = {}) {
+  async function runCheckedCardAction(card, operation, payload = {}) {
     setBusyRow(`${card.id}:${operation}`)
     try {
-      const response = await withLoader(() => api(`/checked-cards/${encodeURIComponent(card.id)}/amazonpay/action`, {
+      const provider = providerLabel(card)
+      const endpoint = provider === 'amazonpay'
+        ? `/checked-cards/${encodeURIComponent(card.id)}/amazonpay/action`
+        : `/checked-cards/${encodeURIComponent(card.id)}/action`
+      const response = await withLoader(() => api(endpoint, {
         method: 'POST',
-        body: JSON.stringify({ operation, ...payload }),
+        body: JSON.stringify({ operation, provider, ...payload }),
       }), {
-        label: `Amazon Pay ${operation} çalışıyor`,
+        label: `${provider} ${operation} çalışıyor`,
         variant: operation.includes('capture') ? 'capture' : operation.includes('sale') ? 'sale' : 'auth',
-        detail: 'Checked card satırı Amazon Pay charge permission ile işleniyor',
+        detail: 'Checked card satırı provider servisi ile işleniyor',
       })
       setResult(response)
       await loadRows()
     } catch (actionError) {
-      const response = actionError.data || { status: 'failed', responseMessage: actionError.message, operation, provider: 'amazonpay' }
+      const response = actionError.data || { status: 'failed', responseMessage: actionError.message, operation, provider: providerLabel(card) }
       setResult(response)
     } finally {
       setBusyRow('')
@@ -318,38 +322,34 @@ export function CheckedCardsPage({ runAction }) {
                   <button
                     className={`balance-button ${statusClass(card.balanceStatus || card.authStatus)}`}
                     type="button"
-                    disabled={!canCapture(card) || actionDisabled(card, 'capture')}
-                    title={canCapture(card) ? 'Capture et' : 'Capture için önce Amazon Pay auth gerekli'}
-                    onClick={() => {
-                      if (!canCapture(card)) return
-                      const amount = askAmount(card, 'capture')
-                      if (amount) runAmazonPayAction(card, 'capture', { amount })
-                    }}
+                    disabled={actionDisabled(card, 'balance')}
+                    title="Balance check çalıştır"
+                    onClick={() => runCheckedCardAction(card, 'balance')}
                   >
                     {balanceText(card)}
                   </button>
                 </td>
                 <td className="checked-card-actions">
                   <span className="pill">{providerLabel(card)}</span>
-                  {providerLabel(card) === 'amazonpay' ? (
-                    <>
-                      <button className="ghost small" type="button" disabled={actionDisabled(card, 'live')} onClick={() => runAmazonPayAction(card, 'live')}>Card live check</button>
-                      <button className="ghost small" type="button" disabled={actionDisabled(card, 'auth')} onClick={() => {
-                        const amount = askAmount(card, 'auth')
-                        if (amount) runAmazonPayAction(card, 'auth', { amount })
-                      }}>Card auth</button>
-                      {hasAuth(card) && card.amazonPayVoidStatus !== 'voided' ? (
-                        <button className="ghost small" type="button" disabled={actionDisabled(card, 'void')} onClick={() => runAmazonPayAction(card, 'void')}>İptal</button>
-                      ) : null}
-                      <button className="ghost small" type="button" disabled={actionDisabled(card, 'balance')} onClick={() => runAmazonPayAction(card, 'balance')}>Balance check</button>
-                      <button className="ghost small" type="button" disabled={actionDisabled(card, 'sale')} onClick={() => {
-                        const amount = askAmount(card, 'sale')
-                        if (amount) runAmazonPayAction(card, 'sale', { amount })
-                      }}>Card sale</button>
-                    </>
-                  ) : (
-                    <button className="ghost small" type="button" disabled title={card.lastLiveMessage || 'Live result checked and stored'}>Live kayıtlı</button>
-                  )}
+                  <button className="ghost small" type="button" disabled={actionDisabled(card, 'live')} onClick={() => runCheckedCardAction(card, 'live')}>Card live check</button>
+                  <button className="ghost small" type="button" disabled={actionDisabled(card, 'auth')} onClick={() => {
+                    const amount = askAmount(card, 'auth')
+                    if (amount) runCheckedCardAction(card, 'auth', { amount })
+                  }}>Card auth</button>
+                  {hasAuth(card) && card.amazonPayVoidStatus !== 'voided' ? (
+                    <button className="ghost small" type="button" disabled={actionDisabled(card, 'void')} onClick={() => runCheckedCardAction(card, 'void')}>İptal</button>
+                  ) : null}
+                  <button className="ghost small" type="button" disabled={actionDisabled(card, 'balance')} onClick={() => runCheckedCardAction(card, 'balance')}>Balance check</button>
+                  <button className="ghost small" type="button" disabled={actionDisabled(card, 'sale')} onClick={() => {
+                    const amount = askAmount(card, 'sale')
+                    if (amount) runCheckedCardAction(card, 'sale', { amount })
+                  }}>Card sale</button>
+                  {canCapture(card) ? (
+                    <button className="ghost small" type="button" disabled={actionDisabled(card, 'capture')} onClick={() => {
+                      const amount = askAmount(card, 'capture')
+                      if (amount) runCheckedCardAction(card, 'capture', { amount })
+                    }}>Capture</button>
+                  ) : null}
                 </td>
                 <td>
                   <button className="ghost small" type="button" onClick={() => openLogs(card)}>Log</button>

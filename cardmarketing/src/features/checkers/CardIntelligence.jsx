@@ -10,12 +10,25 @@ function displayValue(value) {
 
 export function CardIntelligence({ result, title = 'Card Intelligence', live }) {
   const details = result?.details || {}
+  const ipDetails = result?.ipDetails || {}
   const summary = result?.summary || {}
   const compactDetails = {
+    'BIN / IIN': result?.bin || pickDetail(details, ['BIN/IIN']),
+    'Kart Ağı': summary.scheme || summary.brand || pickDetail(details, ['Card Scheme', 'Card Brand']),
     'Kart Tipi': summary.type || pickDetail(details, ['Card Type']),
     'Kart Seviyesi': summary.level || pickDetail(details, ['Card Level']),
     'İhraççı Adı / Banka': summary.issuer || pickDetail(details, ['Issuer Name / Bank']),
     'Ülke': summary.country || pickDetail(details, ['ISO Country Name', 'ISO Country Code A2']),
+    'Para Birimi': summary.currency || pickDetail(details, ['Card Currency', 'ISO Country Currency']),
+    'Veri Kaynağı': result?.sourceLabel || result?.source,
+    'Güven Seviyesi': result?.confidence,
+    'PayPal Vault Durumu': result?.paypalVault?.status,
+    'PayPal Kart Sahibi': result?.paypalVault?.card?.name,
+    'PayPal Kart': result?.paypalVault?.card?.brand && result?.paypalVault?.card?.last4
+      ? `${result.paypalVault.card.brand} •••• ${result.paypalVault.card.last4}`
+      : null,
+    'PayPal Son Kullanma': result?.paypalVault?.card?.expiry,
+    'PayPal Billing Ülkesi': result?.paypalVault?.card?.countryCode,
   }
 
   return (
@@ -24,9 +37,14 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
         <strong>{title}</strong>
         <span className={`pill ${statusClass(result?.status)}`}>{result?.status || '-'}</span>
       </div>
-      {result?.responseMessage || result?.failureReason || (result?.providerWarning && result?.status !== 'passed') ? (
+      {result?.responseMessage || result?.failureReason || result?.providerWarning ? (
         <p className={`error ${result?.status === 'passed' ? 'muted' : ''}`}>
-          {result.responseMessage || result.failureReason || (result?.status !== 'passed' ? result.providerWarning : '')}
+          {result.responseMessage || result.failureReason || result.providerWarning}
+        </p>
+      ) : null}
+      {result?.paypalVault?.error ? (
+        <p className="error">
+          PayPal Vault: {result.paypalVault.error}
         </p>
       ) : null}
       <div className="summary">
@@ -34,6 +52,19 @@ export function CardIntelligence({ result, title = 'Card Intelligence', live }) 
           <div key={label}><span>{label}</span><strong>{displayValue(value)}</strong></div>
         ))}
       </div>
+      {result?.ip && Object.keys(ipDetails).length ? (
+        <>
+          <div className="result-head">
+            <strong>IP Intelligence</strong>
+            <span className="pill">{result.ip}</span>
+          </div>
+          <div className="summary">
+            {Object.entries(ipDetails).map(([label, value]) => (
+              <div key={label}><span>{label}</span><strong>{displayValue(value)}</strong></div>
+            ))}
+          </div>
+        </>
+      ) : null}
       {live ? (
         <section className="live-card-visual">
           <div className="live-card-face">

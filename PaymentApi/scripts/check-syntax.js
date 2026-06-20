@@ -4,9 +4,16 @@ const { spawnSync } = require("child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const ignoredDirs = new Set([".git", ".tmp", "node_modules"]);
+const ignoredPaths = new Set([
+  path.join(rootDir, "public", "react")
+]);
 const jsFiles = [];
 
 function collectJsFiles(dir) {
+  if (ignoredPaths.has(dir)) {
+    return;
+  }
+
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (ignoredDirs.has(entry.name)) {
       continue;

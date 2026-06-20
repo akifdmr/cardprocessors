@@ -120,15 +120,12 @@ async function ensureMongoSchema() {
     db.collection("uncheckedCards").createIndex({ bin: 1, createdAt: -1 }),
     db.collection("checkedLiveCards").createIndex({ uncheckedCardId: 1, createdAt: -1 }),
     db.collection("checkedLiveCards").createIndex({ provider: 1, live: 1, createdAt: -1 }),
-    db.collection("CheckedCards").createIndex({ id: 1 }, { unique: true }),
-    db.collection("CheckedCards").createIndex({ CountryCode: 1, updatedAt: -1 }),
-    db.collection("CheckedCards").createIndex({ CardType: 1, Segment: 1, updatedAt: -1 }),
-    db.collection("CheckedCards").createIndex({ verifyStatus: 1, updatedAt: -1 }),
-    db.collection("CheckedCards").createIndex({ batchId: 1, lineNumber: 1 }),
     db.collection("validCardLists").createIndex({ id: 1 }, { unique: true }),
     db.collection("validCardLists").createIndex({ batchId: 1, lineNumber: 1 }),
     db.collection("validCardLists").createIndex({ first6: 1, last4: 1, expMonth: 1, expYear: 1 }),
     db.collection("validCardLists").createIndex({ validationMode: 1, updatedAt: -1 }),
+    db.collection("binLookupCache").createIndex({ bin: 1 }, { unique: true }),
+    db.collection("binLookupCache").createIndex({ updatedAt: -1 }),
     db.collection("audit_logs").createIndex({ entity_type: 1, entity_id: 1, created_at: -1 })
   ]);
 }

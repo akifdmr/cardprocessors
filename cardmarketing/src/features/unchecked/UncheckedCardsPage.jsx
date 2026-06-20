@@ -5,85 +5,91 @@ import { RequestLogPanel, maskLogPayload } from '../../components/common/Request
 
 // CSS styles
 const styles = `
-  .address-cell {
-    max-width: 200px;
+  .unchecked-cards-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
+  }
+
+  .unchecked-cards-table th,
+  .unchecked-cards-table td {
+    white-space: nowrap;
+    max-width: none;
+  }
+
+  .unchecked-identity,
+  .unchecked-owner,
+  .unchecked-issuer,
+  .unchecked-status {
+    display: grid;
+    gap: 3px;
+  }
+
+  .unchecked-identity strong,
+  .unchecked-owner strong {
+    color: #e4f2e9;
+  }
+
+  .unchecked-meta {
+    color: #8ea49a;
+    font-size: 11px;
+  }
+
+  .unchecked-owner {
+    min-width: 190px;
+    max-width: 280px;
+  }
+
+  .unchecked-owner .unchecked-meta,
+  .unchecked-result {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .address-cell[title]:hover::after {
-    content: attr(title);
-    position: absolute;
-    background: #333;
-    color: #fff;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    z-index: 1000;
-    white-space: normal;
-    max-width: 300px;
-    word-wrap: break-word;
-    margin-top: 4px;
-    margin-left: -10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  .unchecked-result {
+    max-width: 320px;
   }
 
-  .table-wrap table td {
-    position: relative;
-    padding: 8px 10px;
-    font-size: 13px;
-    max-width: 200px;
+  .unchecked-status {
+    min-width: 105px;
+  }
+
+  .unchecked-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .unchecked-status-row > span:first-child {
+    color: #8ea49a;
+    font-size: 11px;
+  }
+
+  .checked-live-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
+  }
+
+  .checked-live-table th,
+  .checked-live-table td {
     white-space: nowrap;
+    max-width: none;
+  }
+
+  .checked-live-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 250px;
+  }
+
+  .checked-live-result {
+    max-width: 280px;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .table-wrap table th {
-    padding: 8px 10px;
-    font-size: 13px;
-  }
-
-  /* Address column specific */
-  .table-wrap table td:nth-child(5) {
-    max-width: 200px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Truncate other long text columns */
-  .table-wrap table td:nth-child(4) { /* Holder name */
-    max-width: 120px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .table-wrap table td:nth-child(6) { /* Bank */
-    max-width: 120px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Tooltip for all truncated cells */
-  .table-wrap table td[title]:hover::after {
-    content: attr(title);
-    position: absolute;
-    background: #333;
-    color: #fff;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    z-index: 1000;
-    white-space: normal;
-    max-width: 300px;
-    word-wrap: break-word;
-    margin-top: 4px;
-    margin-left: -10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    pointer-events: none;
   }
 `
 
@@ -105,8 +111,37 @@ function serverPagination(meta, setPage, setPageSize) {
 
 function StatusPill({ value }) {
   const text = value == null || value === '' ? 'none' : String(value)
-  const tone = ['true', 'passed', 'live', 'checked', 'success'].includes(text.toLowerCase()) ? 'good' : 'muted'
-  return <span className={tone}>{text}</span>
+  const tone = ['true', 'passed', 'live', 'checked', 'success', 'approved', 'authorized', 'captured', 'verified'].includes(text.toLowerCase()) ? 'good' : 'muted'
+  return <span className={`pill ${tone}`}>{text}</span>
+}
+
+function ownerPrimary(card = {}) {
+  return String(card.holderName || '').trim() || 'Sahip bilgisi girilmemiş'
+}
+
+function ownerDetail(card = {}) {
+  return [card.phone, card.address].filter(Boolean).join(' · ') || 'Telefon/adres bilgisi yok'
+}
+
+function cardMeta(card = {}) {
+  return [
+    card.bin ? `BIN ${card.bin}` : null,
+    card.cardType,
+    card.cardLevel,
+  ].filter(Boolean).join(' · ') || 'Kart tipi henüz belirlenmedi'
+}
+
+function checkedLiveStatus(card = {}) {
+  if (card.captureStatus === 'captured' || card.capture === true) return 'captured'
+  if (card.authStatus === 'authorized' || card.auth === true) return 'authorized'
+  if (card.live === true) return 'live'
+  return card.lastAction || 'review'
+}
+
+function checkedLiveAmount(card = {}) {
+  const value = card.authAmount ?? card.lastAmount
+  if (value === null || value === undefined || value === '') return '-'
+  return `${value} ${card.authCurrency || card.lastCurrency || 'USD'}`
 }
 
 function ResultModal({ value, onClose }) {
@@ -310,6 +345,10 @@ function AddCardsModal({ value, setValue, feedback, saving, progress, onClose, o
             placeholder={'cardnumber|exp|cvv|12345|holdername|address\ncardnumber|exp|cvv|holdername|address'}
           />
         </label>
+        <p className="muted">
+          Kart sahibini listede görebilmek için holdername alanını ekleyin:
+          cardnumber|exp|cvv|zip|holdername|address
+        </p>
         <label>
           File
           <input
@@ -363,6 +402,12 @@ function truncateText(text, maxLength = 30) {
   return text.substring(0, maxLength) + '...'
 }
 
+function checkedLiveCanRun(card, operation) {
+  if (!card) return false
+  if (operation === 'capture') return Boolean(card.providerReferenceId)
+  return true
+}
+
 export function UncheckedCardsPage({ user, runAction }) {
   // Inject styles
   useEffect(() => {
@@ -403,7 +448,7 @@ export function UncheckedCardsPage({ user, runAction }) {
   const withLoader = runAction || ((task) => task())
   const canCreateCards = Boolean(user?.permissions?.canCreateCards)
   const canRunAuthCheck = Boolean(user?.permissions?.canRunAuthCheck)
-  const selectableUncheckedRows = unchecked.rows.filter((card) => canRunAuthCheck && !card.checked)
+  const selectableUncheckedRows = unchecked.rows.filter(() => canRunAuthCheck)
   const selectedUncheckedSet = useMemo(() => new Set(selectedUncheckedIds), [selectedUncheckedIds])
   const allVisibleUncheckedSelected = selectableUncheckedRows.length > 0 && selectableUncheckedRows.every((card) => selectedUncheckedSet.has(card.id))
 
@@ -458,7 +503,7 @@ export function UncheckedCardsPage({ user, runAction }) {
       card,
       action: kind === 'unchecked-live' ? 'Live Check' : kind,
       provider: card.provider || 'clover',
-      amount: kind === 'capture' ? '1.00' : '0.01',
+      amount: ['unchecked-live', 'auth', 'capture'].includes(kind) ? '1.00' : '0.01',
       transactionId: card.providerReferenceId || '',
     })
   }
@@ -494,8 +539,10 @@ export function UncheckedCardsPage({ user, runAction }) {
           provider: nextPrompt.provider,
           operation: nextPrompt.kind === 'unchecked-live' ? 'live' : nextPrompt.kind,
           amount,
+          displayAmount: rawAmount,
           balanceAmount: nextPrompt.kind === 'balance' ? rawAmount : undefined,
           currency: 'usd',
+          liveMode: nextPrompt.kind === 'unchecked-live' ? 'preauth' : undefined,
           transactionId: nextPrompt.transactionId || undefined,
           retref: nextPrompt.transactionId || undefined,
         }
@@ -522,6 +569,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           status: error.status || 'failed',
         })
         setResult({ title: `${nextPrompt.action} Failed`, payload })
+        await reloadAll()
       }
     }, { label: `${nextPrompt.action} çalışıyor`, variant: 'transaction', detail: `${nextPrompt.provider} provider isteği gönderiliyor` })
   }
@@ -708,7 +756,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           </div>
           <div className="row-actions unchecked-toolbar">
             {canCreateCards && <button type="button" onClick={() => { setAddFeedback(null); setAddModalOpen(true) }}>Add Cards</button>}
-            <input value={search} onChange={(event) => { setSearch(event.target.value); setUncheckedPage(1); setLivePage(1) }} placeholder="Search masked PAN, BIN, bank" />
+            <input value={search} onChange={(event) => { setSearch(event.target.value); setUncheckedPage(1); setLivePage(1) }} placeholder="Kart, son 4, sahip veya banka ara" />
           </div>
         </div>
         {canRunAuthCheck && <div className="unchecked-checkbar">
@@ -730,7 +778,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           </label>
         </div>}
         <div className="table-wrap">
-          <table>
+          <table className="unchecked-cards-table">
             <thead>
               <tr>
                 <th>
@@ -742,19 +790,14 @@ export function UncheckedCardsPage({ user, runAction }) {
                     onChange={(event) => toggleVisibleUncheckedSelection(event.target.checked)}
                   />
                 </th>
-                <th>Country</th>
-                <th>Bank</th>
-                <th>Level</th>
-                <th>Type</th>
-                <th>PAN</th>
-                <th>Exp</th>
-                <th>Cvv</th>
-                <th>Holder</th>
-                <th>Checked</th>
-                <th>Live</th>
-                <th>Mesaj</th>
-                <th>Added</th>
-                <th>Action</th>
+                <th>Kart</th>
+                <th>Kart Sahibi</th>
+                <th>Banka / Ülke</th>
+                <th>Son Kullanma</th>
+                <th>Durum</th>
+                <th>Sonuç</th>
+                <th>Eklenme</th>
+                <th>İşlem</th>
               </tr>
             </thead>
             <tbody>
@@ -765,35 +808,55 @@ export function UncheckedCardsPage({ user, runAction }) {
                       type="checkbox"
                       aria-label={`${card.maskedPan} seç`}
                       checked={selectedUncheckedSet.has(card.id)}
-                      disabled={!canRunAuthCheck || card.checked}
+                      disabled={!canRunAuthCheck}
                       onChange={(event) => toggleUncheckedSelection(card.id, event.target.checked)}
                     />
                   </td>
-                  <td>{card.countryCode || '-'}</td>
-                  <td title={card.bank || ''}>{truncateText(card.bank, 24)}</td>
-                  <td>{card.cardLevel || '-'}</td>
-                  <td>{card.cardType || '-'}</td>
-                  <td>{card.maskedPan}</td>
-                  <td>{card.exp}</td>
-                  <td>{card.cvv}</td>
-                  <td title={card.holderName || ''}>{truncateText(card.holderName, 20)}</td>
-                  <td><StatusPill value={card.checked} /></td>
-                  <td><StatusPill value={card.live} /></td>
-                  <td title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
+                  <td>
+                    <div className="unchecked-identity">
+                      <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
+                      <span className="unchecked-meta">{cardMeta(card)}</span>
+                    </div>
+                  </td>
+                  <td title={ownerDetail(card)}>
+                    <div className="unchecked-owner">
+                      <strong>{ownerPrimary(card)}</strong>
+                      <span className="unchecked-meta">{ownerDetail(card)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="unchecked-issuer">
+                      <strong>{card.bank || 'Banka henüz belirlenmedi'}</strong>
+                      <span className="unchecked-meta">{card.countryCode || 'Ülke yok'}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="unchecked-identity">
+                      <strong>{card.exp || '-'}</strong>
+                      <span className="unchecked-meta">ZIP {card.zip || 'yok'}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="unchecked-status">
+                      <div className="unchecked-status-row"><span>Checked</span><StatusPill value={card.checked} /></div>
+                      <div className="unchecked-status-row"><span>Live</span><StatusPill value={card.live} /></div>
+                    </div>
+                  </td>
+                  <td className="unchecked-result" title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
                     {truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || '-', 44)}
                   </td>
                   <td>{formatDate(card.createdAt)}</td>
                   <td>
-                    {!canRunAuthCheck
-                      ? <span className="muted">-</span>
-                      : !card.checked
-                        ? <button className="small" type="button" onClick={() => openPrompt('unchecked-live', card)}>Live Check</button>
-                        : <span className="muted">checked</span>}
+                    {canRunAuthCheck
+                      ? <button className="small" type="button" onClick={() => openPrompt('unchecked-live', card)}>
+                          {card.checked ? 'Tekrar Live Check' : 'Live Check'}
+                        </button>
+                      : <span className="muted">-</span>}
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="14" className="muted">{uncheckedError}</td></tr>}
-              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="14" className="muted">Kayıt yok</td></tr>}
+              {uncheckedError && <tr><td colSpan="9" className="muted">{uncheckedError}</td></tr>}
+              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="9" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>
@@ -806,34 +869,65 @@ export function UncheckedCardsPage({ user, runAction }) {
             <p className="eyebrow">Live Records</p>
             <h2>Checked Live Cards</h2>
           </div>
+          <button className="ghost small" type="button" onClick={() => withLoader(loadCheckedLive, { label: 'Live kartlar yenileniyor', variant: 'logs' })}>
+            Yenile
+          </button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="checked-live-table">
             <thead>
               <tr>
-                <th>Masked PAN</th>
-                <th>Provider</th>
+                <th>Kart</th>
+                <th>Kart Sahibi</th>
+                <th>Banka / Ülke</th>
+                <th>Durum</th>
+                <th>Provizyon</th>
                 <th>Reference</th>
-                <th>Balance</th>
-                <th>Live Check</th>
-                <th>Auth</th>
-                <th>Capture</th>
+                <th>Son Sonuç</th>
+                <th>Güncelleme</th>
+                <th>İşlemler</th>
               </tr>
             </thead>
             <tbody>
               {checkedLive.rows.map((card) => (
                 <tr key={card.id}>
-                  <td>{card.maskedPan}</td>
-                  <td>{card.provider || '-'}</td>
-                  <td title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
-                  <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('balance', card)}>Balance</button> : <span className="muted">-</span>}</td>
-                  <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('live', card)}>Live</button> : <span className="muted">-</span>}</td>
-                  <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>Auth</button> : <span className="muted">-</span>}</td>
-                  <td>{canRunAuthCheck ? <button className="small ghost" type="button" onClick={() => openPrompt('capture', card)}>Capture</button> : <span className="muted">-</span>}</td>
+                  <td>
+                    <div className="unchecked-identity">
+                      <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
+                      <span className="unchecked-meta">{cardMeta(card)}</span>
+                    </div>
+                  </td>
+                  <td title={ownerDetail(card)}>
+                    <div className="unchecked-owner">
+                      <strong>{ownerPrimary(card)}</strong>
+                      <span className="unchecked-meta">{ownerDetail(card)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="unchecked-issuer">
+                      <strong>{card.bank || 'Banka belirlenmedi'}</strong>
+                      <span className="unchecked-meta">{card.countryCode || 'Ülke yok'} · {card.provider || '-'}</span>
+                    </div>
+                  </td>
+                  <td><StatusPill value={checkedLiveStatus(card)} /></td>
+                  <td><strong>{checkedLiveAmount(card)}</strong></td>
+                  <td className="mono" title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
+                  <td className="checked-live-result" title={card.lastMessage || card.lastResult?.responseMessage || ''}>
+                    {truncateText(card.lastMessage || card.lastResult?.responseMessage || '-', 40)}
+                  </td>
+                  <td>{formatDate(card.updatedAt || card.createdAt)}</td>
+                  <td>
+                    <div className="checked-live-actions">
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'live') ? <button className="small ghost" type="button" onClick={() => openPrompt('live', card)}>Live</button> : null}
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'auth') ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>1$ Auth</button> : null}
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'capture') ? <button className="small ghost" type="button" onClick={() => openPrompt('capture', card)}>Capture</button> : null}
+                      {!checkedLiveCanRun(card, 'capture') ? <span className="muted">Capture için ref yok</span> : null}
+                    </div>
+                  </td>
                 </tr>
               ))}
-              {checkedLiveError && <tr><td colSpan="7" className="muted">{checkedLiveError}</td></tr>}
-              {!checkedLive.rows.length && !checkedLiveError && <tr><td colSpan="7" className="muted">Live kayıt yok</td></tr>}
+              {checkedLiveError && <tr><td colSpan="9" className="muted">{checkedLiveError}</td></tr>}
+              {!checkedLive.rows.length && !checkedLiveError && <tr><td colSpan="9" className="muted">Live kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>

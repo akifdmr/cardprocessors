@@ -227,6 +227,26 @@ function extractBearerToken(headerValue) {
   return headerValue.slice(7).trim();
 }
 
+function extractBasicCredentials(headerValue) {
+  if (!headerValue || !String(headerValue).startsWith("Basic ")) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(String(headerValue).slice(6).trim(), "base64").toString("utf8");
+    const separator = decoded.indexOf(":");
+    if (separator < 1) {
+      return null;
+    }
+    return {
+      username: decoded.slice(0, separator),
+      password: decoded.slice(separator + 1)
+    };
+  } catch {
+    return null;
+  }
+}
+
 function extractCookieToken(headerValue) {
   if (!headerValue) {
     return null;
@@ -246,8 +266,33 @@ function extractCookieToken(headerValue) {
 }
 
 async function requireAuth(req, res, next) {
-  const token = extractBearerToken(req.headers.authorization) || extractCookieToken(req.headers.cookie);
+  const authorization = req.headers.authorization;
+  const basicCredentials = extractBasicCredentials(authorization);
+  if (basicCredentials) {
+    const user = await authenticate(basicCredentials.username, basicCredentials.password);
+    if (!user) {
+      res.setHeader("WWW-Authenticate", "Basic realm=\"CardMarket PaymentApi\"");
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    req.user = {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      role: user.role,
+      permissions: getEffectivePermissions(user)
+    };
+    req.session = {
+      id: null,
+      expiresAt: null,
+      authMode: "basic"
+    };
+    return next();
+  }
+
+  const token = extractBearerToken(authorization) || extractCookieToken(req.headers.cookie);
   if (!token) {
+    res.setHeader("WWW-Authenticate", "Basic realm=\"CardMarket PaymentApi\"");
     return res.status(401).json({ error: "Authentication required" });
   }
 

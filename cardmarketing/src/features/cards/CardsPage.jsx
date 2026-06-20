@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { PaginationControls, usePagination } from '../../components/common/Pagination'
-import { formatCardLabel, formatMoneyInput, moneyValue, statusClass } from '../../utils/format'
-
-function attemptStatus(checks, type) {
-  const item = checks.find((check) => check.attempt_type === type)
-  return item?.status || 'none'
-}
+import { formatCardLabel, formatMoneyInput, moneyValue } from '../../utils/format'
 
 function firstSixFromCard(card = {}) {
   return String(card.first6 || card.bin || card.masked_pan || card.maskedPan || card.pan || '')
@@ -32,12 +27,12 @@ function JsonModal({ title, value, onClose }) {
 }
 
 export function CardsPage({ cards, onRefreshCards, runAction }) {
-  const [checksByCard, setChecksByCard] = useState({})
   const [modal, setModal] = useState(null)
   const [enrollment, setEnrollment] = useState(null)
   const [actionPrompt, setActionPrompt] = useState(null)
   const [catalog, setCatalog] = useState(null)
   const [search, setSearch] = useState('')
+  const [selectedCardIds, setSelectedCardIds] = useState([])
   const withLoader = runAction || ((task) => task())
   const filteredCards = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -54,15 +49,71 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
     ].filter(Boolean).join(' ').toLowerCase().includes(needle))
   }, [cards, search])
   const cardPagination = usePagination(filteredCards, 25)
+  const selectedCardIdSet = useMemo(() => new Set(selectedCardIds), [selectedCardIds])
+  const tokenVerificationEligible = (card) => (
+    ['braintree', 'paypal'].includes(String(card.provider || '').toLowerCase()) &&
+    Boolean(card.provider_payment_token)
+  )
+  const visibleEligibleCards = cardPagination.visibleItems.filter(tokenVerificationEligible)
+  const allVisibleEligibleSelected = visibleEligibleCards.length > 0 &&
+    visibleEligibleCards.every((card) => selectedCardIdSet.has(card.id))
 
   useEffect(() => {
     api('/provider-operations/catalog').then(setCatalog).catch(console.error)
   }, [])
 
   async function loadChecks(cardId) {
-    const checks = await api(`/cards/${cardId}/checks`)
-    setChecksByCard((current) => ({ ...current, [cardId]: checks }))
-    return checks
+    return api(`/cards/${cardId}/checks`)
+  }
+
+  function toggleCardSelection(cardId, checked) {
+    setSelectedCardIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(cardId)
+      else next.delete(cardId)
+      return [...next]
+    })
+  }
+
+  function toggleVisibleSelection(checked) {
+    setSelectedCardIds((current) => {
+      const next = new Set(current)
+      for (const card of visibleEligibleCards) {
+        if (checked) next.add(card.id)
+        else next.delete(card.id)
+      }
+      return [...next]
+    })
+  }
+
+  async function verifyTokenizedCards(cardIds) {
+    const uniqueIds = [...new Set(cardIds)].slice(0, 25)
+    if (!uniqueIds.length) return
+    await withLoader(async () => {
+      let result
+      try {
+        result = await api('/unified-processor/payment-methods/verify', {
+          method: 'POST',
+          body: JSON.stringify({
+            cardIds: uniqueIds,
+            amount: 1,
+            currency: 'USD',
+          }),
+        })
+      } catch (error) {
+        result = error.data || {
+          status: 'failed',
+          responseMessage: error.message,
+        }
+      }
+      setSelectedCardIds((current) => current.filter((id) => !uniqueIds.includes(id)))
+      await onRefreshCards?.()
+      setModal({ title: `Token Auth + Void (${uniqueIds.length})`, value: result })
+    }, {
+      label: `${uniqueIds.length} tokenized payment method doğrulanıyor`,
+      variant: 'auth',
+      detail: 'Sandbox üzerinde 1 USD authorization açılıp aynı işlem void ediliyor',
+    })
   }
 
   function payloadForCard(card, extra = {}) {
@@ -267,12 +318,30 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
           <span>Search</span>
           <input value={search} placeholder="Card, holder, provider, first6, last4..." onChange={(event) => setSearch(event.target.value)} />
         </label>
+        <button
+          className="primary small"
+          type="button"
+          disabled={!selectedCardIds.length}
+          onClick={() => verifyTokenizedCards(selectedCardIds)}
+        >
+          Seçilenleri Auth + Void ({selectedCardIds.length})
+        </button>
       </div>
       <div className="table-wrap">
         <table className="processor-table">
           <thead>
             <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  aria-label="Görünen tokenized payment method kayıtlarını seç"
+                  checked={allVisibleEligibleSelected}
+                  disabled={!visibleEligibleCards.length}
+                  onChange={(event) => toggleVisibleSelection(event.target.checked)}
+                />
+              </th>
               <th>Card</th>
+              <th>Provider</th>
               <th>Holder</th>
               <th>Actions</th>
             </tr>
@@ -281,15 +350,32 @@ export function CardsPage({ cards, onRefreshCards, runAction }) {
             {cardPagination.visibleItems.map((card) => {
               return (
                 <tr key={card.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`${formatCardLabel(card)} seç`}
+                      checked={selectedCardIdSet.has(card.id)}
+                      disabled={!tokenVerificationEligible(card)}
+                      onChange={(event) => toggleCardSelection(card.id, event.target.checked)}
+                    />
+                  </td>
                   <td>{formatCardLabel(card)}</td>
+                  <td>{card.provider || '-'}</td>
                   <td>{card.cardholder_name || '-'}</td>
                   <td className="processor-table-actions">
                     <div className="processor-row-actions">
                       <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'select')}>Open</button>
                       <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'verify-number')}>Verify Number</button>
                       <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'bin')}>BIN Check</button>
-                      <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'live')}>Live Check</button>
-                      <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'balance')}>Balance</button>
+                      <button
+                        className="ghost small"
+                        type="button"
+                        disabled={!tokenVerificationEligible(card)}
+                        title={tokenVerificationEligible(card) ? 'Sandbox 1 USD auth + void' : 'Braintree/PayPal vaulted token gerekli'}
+                        onClick={() => verifyTokenizedCards([card.id])}
+                      >
+                        Token Auth + Void
+                      </button>
                       <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'number-lookup')}>Number Lookup</button>
                       <button className="ghost small" type="button" onClick={() => handleCardActionClick(card, 'history')}>History</button>
                       {!card.is_enrolled ? <button className="primary small" type="button" onClick={() => handleCardActionClick(card, 'enroll')}>Enroll</button> : null}

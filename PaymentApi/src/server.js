@@ -12,6 +12,7 @@ const { listAuditLogs, writeAuditLog } = require("./services/auditService");
 const cloverService = require("./services/cloverService");
 const fluidpayService = require("./services/fluidpayService");
 const braintreeService = require("./services/braintreeService");
+const unifiedPaymentProcessor = require("./services/unifiedPaymentProcessor");
 const nmiService = require("./services/nmiService");
 const zohoPaymentsService = require("./services/zohoPaymentsService");
 const amazonPayService = require("./services/amazonPayService");
@@ -98,6 +99,11 @@ const openApiDocument = {
   ],
   components: {
     securitySchemes: {
+      basicAuth: {
+        type: "http",
+        scheme: "basic",
+        description: "Postman/API credential authentication using application username and password"
+      },
       bearerAuth: {
         type: "http",
         scheme: "bearer",
@@ -2753,6 +2759,21 @@ function getCardProviderConfigStatus(provider) {
 }
 
 const providerOperationCatalog = {
+  unifiedpayments: {
+    key: "unifiedpayments",
+    provider: "unifiedpayments",
+    label: "PayPal + Braintree Unified",
+    description: "Sandbox-only vaulted payment method verification through PayPal or Braintree.",
+    methods: [{
+      key: "token_auth_void",
+      label: "Token Auth + Void",
+      operation: "token_auth_void",
+      endpoint: "POST /api/unified-processor/payment-methods/verify",
+      fields: ["cardIds", "amount", "currency"],
+      required: ["cardIds"],
+      features: ["Vaulted tokens only", "1.00 USD maximum", "Immediate void", "Single or up to 25 selected records"]
+    }]
+  },
   propelr: {
     key: "propelr",
     provider: "propelr",
@@ -3078,8 +3099,9 @@ const providerOperationCatalog = {
     key: "paypal",
     provider: "paypal",
     label: "PayPal",
-    description: "PayPal NVP / Payflow payment operations.",
+    description: "PayPal NVP / Payflow operations plus sandbox-only REST dummy order authorization.",
     methods: [
+      { key: "sandbox_order_auth", label: "Sandbox Order Auth", operation: "sandbox_order_auth", endpoint: "POST /api/providers/paypal/sandbox/orders/card-authorize", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "cardholderName", "billingAddressLine1", "billingCity", "billingState", "billingCountry", "description"], required: ["pan", "expMonth", "expYear", "cvv2", "amount"], features: ["Sandbox-only PayPal REST Orders API", "Creates dummy order with intent AUTHORIZE", "Blocked outside PAYPAL_ENV=sandbox"] },
       { key: "live_check", label: "Live Check", operation: "live", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Runs DoDirectPayment Authorization", "Use with cardholder authorization", "Void the authorization if you do not intend to capture"] },
       { key: "sale", label: "Sale", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["DoDirectPayment sale"] },
       { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency"], required: ["pan", "expMonth", "expYear", "amount"], features: ["Authorization hold"] },
@@ -3091,16 +3113,21 @@ const providerOperationCatalog = {
 
 function getProviderOperationCatalog() {
   const publicConfig = getPublicProviderConfig();
-  return Object.fromEntries(
+  const catalog = Object.fromEntries(
     Object.entries(providerOperationCatalog).map(([key, provider]) => [
       key,
       {
         ...provider,
-        configured: Boolean(publicConfig[key]?.configured || publicConfig[key]?.ecommerceConfigured || publicConfig[key]?.tokenizationConfigured),
+        configured: key === "unifiedpayments"
+          ? Boolean(braintreeService.getStatus().configured || paypalService.isSandboxRestConfigured())
+          : Boolean(publicConfig[key]?.configured || publicConfig[key]?.ecommerceConfigured || publicConfig[key]?.tokenizationConfigured),
         config: publicConfig[key] || null
       }
     ])
   );
+  delete catalog.paypal;
+  delete catalog.braintree;
+  return catalog;
 }
 
 function normalizeProviderKey(provider) {
@@ -3387,6 +3414,22 @@ app.get("/api/security/burp-suite/pending", requireAuth, requirePermission("canL
 app.post("/api/security/burp-suite/pending/:pendingId/resolve", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
   res.json(burpSuiteService.resolvePendingResponse(req.params.pendingId, req.body || {}));
 }));
+
+const postmanDirectory = path.resolve(__dirname, "..", "postman");
+const postmanCollectionPath = path.join(postmanDirectory, "CardMarket-PaymentApi.postman_collection.json");
+const postmanEnvironmentPath = path.join(postmanDirectory, "CardMarket-Local.postman_environment.json");
+
+app.get("/openapi.json", (_req, res) => {
+  res.json(openApiDocument);
+});
+
+app.get("/api/meta/postman/collection", (_req, res) => {
+  res.download(postmanCollectionPath, "CardMarket-PaymentApi.postman_collection.json");
+});
+
+app.get("/api/meta/postman/environment", (_req, res) => {
+  res.download(postmanEnvironmentPath, "CardMarket-Local.postman_environment.json");
+});
 
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
@@ -4915,6 +4958,146 @@ app.post("/api/providers/braintree/dropin/checkout", requireAuth, requirePermiss
   }
 }));
 
+async function verifyStoredPaymentMethod({ card, amount, currency, userId }) {
+  const result = await unifiedPaymentProcessor.authThenVoid({
+    provider: card.provider,
+    paymentMethodToken: card.provider_payment_token,
+    amount,
+    currency,
+    reference: `stored-card-${card.id}`
+  });
+  const safeResult = redactSensitiveReportData(result);
+  const successful = result.status === "verified";
+  const now = new Date().toISOString();
+
+  await db.getDb().then((mongo) => mongo.collection("cards").updateOne(
+    { id: card.id },
+    {
+      $set: {
+        verification_status: successful ? "verified" : result.status,
+        provider_reference_id: result.transactionId || card.provider_reference_id || null,
+        updated_at: now
+      }
+    }
+  ));
+
+  await insertProviderAttempt({
+    cardId: card.id,
+    provider: card.provider,
+    attemptType: "token_auth_void",
+    status: result.status,
+    amount: Number(result.amount || amount),
+    currency: result.currency || currency,
+    providerReferenceId: result.transactionId || null,
+    rawResponse: safeResult,
+    createdByUserId: userId
+  });
+
+  await writeAuditLog({
+    entityType: "stored_payment_method",
+    entityId: card.id,
+    action: "stored_payment_method_auth_void",
+    status: result.status,
+    actorUserId: userId,
+    details: safeResult
+  });
+
+  return {
+    cardId: card.id,
+    provider: card.provider,
+    maskedPan: card.masked_pan,
+    last4: card.last4,
+    ...safeResult
+  };
+}
+
+app.post("/api/unified-processor/payment-methods/verify", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const requestedIds = Array.isArray(req.body.cardIds)
+    ? req.body.cardIds
+    : [req.body.cardId].filter(Boolean);
+  const cardIds = [...new Set(requestedIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!cardIds.length) {
+    return sendApiError(res, req, 400, "cardId or cardIds is required", "VALIDATION_ERROR");
+  }
+  if (cardIds.length > 25) {
+    return sendApiError(res, req, 400, "At most 25 payment methods can be verified per request", "BATCH_LIMIT");
+  }
+
+  const mongo = await db.getDb();
+  const cards = await mongo.collection("cards").find(
+    { id: { $in: cardIds } },
+    {
+      projection: {
+        _id: 0,
+        id: 1,
+        provider: 1,
+        provider_payment_token: 1,
+        provider_reference_id: 1,
+        masked_pan: 1,
+        last4: 1
+      }
+    }
+  ).toArray();
+  const byId = new Map(cards.map((card) => [String(card.id), card]));
+  const amount = req.body.amount == null ? 1 : Number(req.body.amount);
+  const currency = String(req.body.currency || "USD").toUpperCase();
+  const results = [];
+
+  for (const cardId of cardIds) {
+    const card = byId.get(cardId);
+    if (!card) {
+      results.push({ cardId, status: "not_found", responseMessage: "Stored payment method not found" });
+      continue;
+    }
+    if (!unifiedPaymentProcessor.supportedProviders.includes(String(card.provider || "").toLowerCase())) {
+      results.push({
+        cardId,
+        provider: card.provider,
+        status: "unsupported",
+        responseMessage: "Only Braintree and PayPal vaulted payment methods are supported"
+      });
+      continue;
+    }
+    if (!card.provider_payment_token) {
+      results.push({
+        cardId,
+        provider: card.provider,
+        status: "token_required",
+        responseMessage: "Vaulted provider payment token is missing"
+      });
+      continue;
+    }
+
+    try {
+      results.push(await verifyStoredPaymentMethod({
+        card,
+        amount,
+        currency,
+        userId: req.user?.id || null
+      }));
+    } catch (error) {
+      results.push({
+        cardId,
+        provider: card.provider,
+        status: "failed",
+        responseMessage: getProviderMessage(error)
+      });
+    }
+  }
+
+  const verified = results.filter((item) => item.status === "verified").length;
+  res.status(verified === results.length ? 200 : 207).json({
+    status: verified === results.length ? "verified" : (verified ? "partial" : "failed"),
+    processor: "paypal_braintree_unified",
+    requested: cardIds.length,
+    verified,
+    failed: results.length - verified,
+    amount,
+    currency,
+    results
+  });
+}));
+
 function nmiCardRoute(operation) {
   return asyncHandler(async (req, res) => {
     await runProviderCardOperation(req, res, {
@@ -5395,7 +5578,8 @@ function uncheckedCardPublicFields(card = {}) {
     sourceLineNumber: card.sourceLineNumber,
     correlationId: card.correlationId,
     recordHash: card.recordHash,
-    maskedPan: card.maskedPan,
+    maskedPan: cardCheckService.maskPan(card.maskedPan || [card.bin, card.last4].filter(Boolean).join("")) ||
+      (card.bin && card.last4 ? `${card.bin}******${card.last4}` : null),
     bin: card.bin,
     last4: card.last4,
     exp: card.exp,
@@ -5483,7 +5667,7 @@ function uncheckedOperatorResult({ live = false, result = {}, error = null } = {
   if (live) {
     return {
       operatorStatus: "live",
-      operatorMessage: "LIVE: Kart onay aldı, otomatik CheckedCards tablosuna taşındı."
+      operatorMessage: "LIVE: Kart onay aldı, checked live listesine taşındı."
     };
   }
 
@@ -5573,28 +5757,121 @@ function checkedLiveProjection() {
     bin: 1,
     last4: 1,
     exp: 1,
+    expMonth: 1,
+    expYear: 1,
+    zip: 1,
     holderName: 1,
+    address: 1,
+    phone: 1,
     countryCode: 1,
     bank: 1,
     cardType: 1,
     cardLevel: 1,
     provider: 1,
     providerReferenceId: 1,
+    providerPaymentToken: 1,
     live: 1,
     capture: 1,
     auth: 1,
     balance: 1,
     lastAction: 1,
+    lastAmount: 1,
+    lastCurrency: 1,
+    lastMessage: 1,
+    lastResultCode: 1,
+    authAmount: 1,
+    authCurrency: 1,
+    authStatus: 1,
+    captureStatus: 1,
     lastResult: 1,
     createdAt: 1,
     updatedAt: 1
   };
 }
 
+function safeCheckedLiveMaskedPan(card = {}) {
+  const source = card.maskedPan || [card.bin, card.last4].filter(Boolean).join("");
+  return cardCheckService.maskPan(source) ||
+    (card.bin && card.last4 ? `${card.bin}******${card.last4}` : null);
+}
+
+async function syncCheckedLiveCardsFromUnchecked(mongo) {
+  const liveCards = await mongo.collection("uncheckedCards").find(
+    { live: true },
+    {
+      projection: {
+        _id: 0,
+        id: 1,
+        maskedPan: 1,
+        bin: 1,
+        last4: 1,
+        exp: 1,
+        expMonth: 1,
+        expYear: 1,
+        zip: 1,
+        holderName: 1,
+        address: 1,
+        phone: 1,
+        countryCode: 1,
+        bank: 1,
+        cardType: 1,
+        cardLevel: 1,
+        provider: 1,
+        providerReferenceId: 1,
+        lastCheck: 1,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    }
+  ).toArray();
+
+  if (!liveCards.length) return;
+
+  await mongo.collection("checkedLiveCards").bulkWrite(
+    liveCards.map((card) => ({
+      updateOne: {
+        filter: { uncheckedCardId: card.id },
+        update: {
+          $setOnInsert: {
+            id: uuidv4(),
+            createdAt: card.createdAt || new Date().toISOString(),
+            providerReferenceId: card.providerReferenceId || null,
+            lastAction: card.lastCheck?.operation || "live",
+            lastMessage: card.lastCheck?.operatorMessage || null,
+            lastResult: card.lastCheck?.response || null
+          },
+          $set: {
+            maskedPan: safeCheckedLiveMaskedPan(card),
+            bin: card.bin,
+            last4: card.last4,
+            exp: card.exp,
+            expMonth: card.expMonth,
+            expYear: card.expYear,
+            zip: card.zip || null,
+            holderName: card.holderName || null,
+            address: card.address || null,
+            phone: card.phone || null,
+            countryCode: card.countryCode || null,
+            bank: card.bank || null,
+            cardType: card.cardType || null,
+            cardLevel: card.cardLevel || null,
+            provider: card.provider || "clover",
+            live: true,
+            updatedAt: card.updatedAt || new Date().toISOString()
+          }
+        },
+        upsert: true
+      }
+    })),
+    { ordered: false }
+  );
+}
+
 function checkedCardsProjection() {
   return {
     _id: 0,
     id: 1,
+    uncheckedCardId: 1,
     CountryCode: 1,
     CardType: 1,
     Segment: 1,
@@ -5630,6 +5907,8 @@ function checkedCardsProjection() {
     binlabel: 1,
     verifyStatus: 1,
     providerRef: 1,
+    providerReferenceId: 1,
+    providerPaymentToken: 1,
     failureReason: 1,
     processingTimeMs: 1,
     batchId: 1,
@@ -5855,7 +6134,7 @@ function tokenRequiredResponse(card, operation, provider) {
     provider,
     card: {
       id: card.id,
-      maskedPan: card.maskedPan,
+      maskedPan: safeCheckedLiveMaskedPan(card),
       bin: card.bin,
       last4: card.last4,
       exp: card.exp
@@ -5876,11 +6155,20 @@ function isLiveOperationResponse(payload = {}, httpStatus = 200) {
   );
 }
 
+function operationCanUseProviderReference(operation) {
+  return ["capture", "refund", "void", "reversal", "transaction_detail"].includes(operation);
+}
+
 function providerPayloadFromMaskedRecord(card, provider, operation, body = {}) {
-  const token = body.providerPaymentToken || body.source || body.token || card.providerPaymentToken || card.providerReferenceId;
+  const referenceToken = operationCanUseProviderReference(operation) ? card.providerReferenceId : undefined;
+  const token = body.providerPaymentToken || body.source || body.token || card.providerPaymentToken || referenceToken;
   return {
     provider,
     operation,
+    pan: body.pan || card.pan || undefined,
+    cvv: body.cvv || card.cvv || undefined,
+    cvv2: body.cvv2 || body.cvv || card.cvv || undefined,
+    cvc: body.cvc || body.cvv || card.cvv || undefined,
     providerPaymentToken: token,
     source: provider === "clover" ? token : body.source,
     token,
@@ -5889,12 +6177,12 @@ function providerPayloadFromMaskedRecord(card, provider, operation, body = {}) {
     bin: card.bin,
     first6: card.bin,
     last4: card.last4,
-    expMonth: card.expMonth,
-    expYear: card.expYear,
-    billingZip: card.zip || "00000",
-    zip: card.zip || "00000",
-    postalCode: card.zip || "00000",
-    cardholderName: card.holderName,
+    expMonth: body.expMonth || card.expMonth,
+    expYear: body.expYear || card.expYear,
+    billingZip: body.billingZip || body.zip || card.zip || "00000",
+    zip: body.zip || body.billingZip || card.zip || "00000",
+    postalCode: body.postalCode || body.zip || body.billingZip || card.zip || "00000",
+    cardholderName: body.cardholderName || card.holderName,
     amount: Number(body.amount || 1),
     currency: body.currency || "usd",
     runBinCheck: body.runBinCheck === true
@@ -5902,7 +6190,14 @@ function providerPayloadFromMaskedRecord(card, provider, operation, body = {}) {
 }
 
 async function runMaskedCardProviderOperation(req, card, provider, operation, body = {}) {
-  if (!(body.providerPaymentToken || body.source || body.token || card.providerPaymentToken || card.providerReferenceId)) {
+  const hasRunnableSource = body.providerPaymentToken ||
+    body.source ||
+    body.token ||
+    body.pan ||
+    card.pan ||
+    card.providerPaymentToken ||
+    (operationCanUseProviderReference(operation) && card.providerReferenceId);
+  if (!hasRunnableSource) {
     return {
       httpStatus: 400,
       payload: tokenRequiredResponse(card, operation, provider)
@@ -5930,17 +6225,117 @@ async function runMaskedCardProviderOperation(req, card, provider, operation, bo
   return { httpStatus, payload };
 }
 
+function expPartsFromCheckedLiveCard(card = {}) {
+  if (card.expMonth && card.expYear) {
+    return {
+      expMonth: String(card.expMonth),
+      expYear: String(card.expYear)
+    };
+  }
+
+  const [rawMonth, rawYear] = String(card.exp || "").split(/[/-]/).map((part) => part.trim()).filter(Boolean);
+  if (!rawMonth || !rawYear) {
+    return { expMonth: null, expYear: null };
+  }
+
+  return {
+    expMonth: rawMonth.padStart(2, "0"),
+    expYear: rawYear.length === 2 ? `20${rawYear}` : rawYear
+  };
+}
+
+function expLookupValues(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  const unpadded = raw.replace(/^0+/, "") || raw;
+  const padded = unpadded.padStart(2, "0");
+  const numeric = Number(unpadded);
+  return [...new Set([
+    raw,
+    unpadded,
+    padded,
+    Number.isFinite(numeric) ? numeric : null
+  ].filter((item) => item !== null && item !== ""))];
+}
+
+async function enrichCheckedLiveCardForProviderAction(mongo, card, provider, body = {}) {
+  const exp = expPartsFromCheckedLiveCard(card);
+  if (card.uncheckedCardId) {
+    const unchecked = await mongo.collection("uncheckedCards").findOne(
+      { id: card.uncheckedCardId },
+      { projection: { _id: 0 } }
+    );
+    if (unchecked?.panEncrypted) {
+      return {
+        ...card,
+        pan: decrypt(unchecked.panEncrypted),
+        cvv: unchecked.cvvEncrypted ? decrypt(unchecked.cvvEncrypted) : undefined,
+        expMonth: unchecked.expMonth || exp.expMonth,
+        expYear: unchecked.expYear || exp.expYear,
+        zip: unchecked.zip || card.zip || "00000",
+        holderName: unchecked.holderName || card.holderName || undefined,
+        providerPaymentToken: body.providerPaymentToken || card.providerPaymentToken || undefined,
+        providerReferenceId: body.transactionId || body.retref || card.providerReferenceId || undefined
+      };
+    }
+  }
+
+  const storedCard = await mongo.collection("cards").findOne({
+    provider,
+    first6: card.bin,
+    last4: card.last4,
+    ...(exp.expMonth ? { exp_month: { $in: expLookupValues(exp.expMonth) } } : {}),
+    ...(exp.expYear ? { exp_year: { $in: expLookupValues(exp.expYear) } } : {})
+  }, {
+    projection: { _id: 0 }
+  });
+
+  if (!storedCard) {
+    return {
+      ...card,
+      expMonth: exp.expMonth,
+      expYear: exp.expYear
+    };
+  }
+
+  let pan = null;
+  try {
+    pan = storedCard.pan_encrypted ? decrypt(storedCard.pan_encrypted) : null;
+  } catch {
+    pan = null;
+  }
+
+  return {
+    ...card,
+    pan: pan || undefined,
+    expMonth: storedCard.exp_month || exp.expMonth,
+    expYear: storedCard.exp_year || exp.expYear,
+    zip: storedCard.billing_zip || card.zip || "00000",
+    holderName: storedCard.cardholder_name || card.holderName || undefined,
+    providerPaymentToken: body.providerPaymentToken || storedCard.provider_payment_token || card.providerPaymentToken || undefined,
+    providerReferenceId: body.transactionId || body.retref || storedCard.provider_reference_id || card.providerReferenceId || undefined
+  };
+}
+
 async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId = null }) {
   const now = new Date().toISOString();
   const result = await cardCheckService.checkCard(uncheckedCardCheckPayload(card, body));
-  const live = checkedStateFromServiceResult(result);
   const binPatch = binPatchFromResult(result.binCheck);
-  const operatorResult = uncheckedOperatorResult({ live, result });
   const provider = String(body.provider || card.provider || "clover").toLowerCase();
   const providerReferenceId = result.live?.providerReferenceId ||
     result.live?.transactionId ||
     result.live?.cloverChargeId ||
     card.providerReferenceId ||
+    null;
+  const isPreauth = String(body.liveMode || "").toLowerCase() === "preauth";
+  const providerApproved = checkedStateFromServiceResult(result);
+  const live = isPreauth && providerApproved && Boolean(providerReferenceId);
+  const operatorResult = uncheckedOperatorResult({ live, result });
+  const operationAmount = body.displayAmount ?? result.live?.amount ?? result.amount ?? null;
+  const operationCurrency = String(result.live?.currency || result.currency || body.currency || "USD").toUpperCase();
+  const operationMessage = result.live?.responseMessage ||
+    result.live?.failureReason ||
+    result.responseMessage ||
     null;
   const patch = {
     checked: true,
@@ -5977,7 +6372,7 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
       bank: binPatch.bank || null,
       cardBank: binPatch.bank || null,
       issuerBank: binPatch.bank || null,
-      maskedPan: card.maskedPan,
+      maskedPan: safeCheckedLiveMaskedPan(card),
       first6: card.bin,
       last4: card.last4,
       expMonth: card.expMonth,
@@ -6000,27 +6395,16 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
       updatedAt: now
     };
 
-    await mongo.collection("CheckedCards").updateOne(
-      { id: checkedId },
-      {
-        $setOnInsert: {
-          id: checkedId,
-          createdAt: now
-        },
-        $set: Object.fromEntries(Object.entries(verifiedCard).filter(([key]) => key !== "id"))
-      },
-      { upsert: true }
-    );
     await writeAuditLog({
-      entityType: "checked_card",
+      entityType: "checked_live_card",
       entityId: checkedId,
-      action: "checked_card_live_then_bin",
+      action: "checked_live_card_live_then_bin",
       status: "verified",
       actorUserId: userId,
       details: redactSensitiveReportData({
         request: uncheckedCardCheckPayload(card, body),
         response: result,
-        checkedCard: verifiedCard
+        checkedLiveCard: verifiedCard
       })
     });
     await mongo.collection("verifiedCards").updateOne(
@@ -6046,11 +6430,16 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
           createdAt: now
         },
         $set: {
-          maskedPan: card.maskedPan,
+          maskedPan: safeCheckedLiveMaskedPan(card),
           bin: card.bin,
           last4: card.last4,
           exp: card.exp,
+          expMonth: card.expMonth,
+          expYear: card.expYear,
+          zip: card.zip || null,
           holderName: card.holderName || null,
+          address: card.address || null,
+          phone: card.phone || null,
           countryCode: binPatch.countryCode || card.countryCode || null,
           bank: binPatch.bank || card.bank || null,
           cardType: binPatch.cardType || card.cardType || null,
@@ -6058,7 +6447,17 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
           provider,
           providerReferenceId,
           live: true,
-          lastAction: "live_then_bin",
+          ...(isPreauth ? {
+            auth: true,
+            authStatus: "authorized",
+            authAmount: operationAmount,
+            authCurrency: operationCurrency
+          } : {}),
+          lastAction: isPreauth ? "auth" : "live_then_bin",
+          lastAmount: operationAmount,
+          lastCurrency: operationCurrency,
+          lastMessage: operationMessage,
+          lastResultCode: result.live?.resultCode || result.resultCode || null,
           lastResult: redactSensitiveReportData(result),
           updatedAt: now
         }
@@ -6069,7 +6468,7 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
 
   return {
     id: card.id,
-    maskedPan: card.maskedPan,
+    maskedPan: safeCheckedLiveMaskedPan(card),
     checked: true,
     live,
     provider,
@@ -6110,7 +6509,7 @@ app.get("/api/unchecked-cards", requireAuth, requirePermission("canListCards"), 
   ]);
 
   res.json({
-    rows,
+    rows: rows.map(uncheckedCardPublicFields),
     total,
     page,
     pageSize,
@@ -6288,11 +6687,16 @@ app.post("/api/unchecked-cards/:cardId/live-check", requireAuth, requirePermissi
           createdAt: now
         },
         $set: {
-          maskedPan: card.maskedPan,
+          maskedPan: safeCheckedLiveMaskedPan(card),
           bin: card.bin,
           last4: card.last4,
           exp: card.exp,
+          expMonth: card.expMonth,
+          expYear: card.expYear,
+          zip: card.zip || null,
           holderName: card.holderName || null,
+          address: card.address || null,
+          phone: card.phone || null,
           countryCode: card.countryCode || null,
           bank: card.bank || null,
           cardType: card.cardType || null,
@@ -6340,7 +6744,7 @@ app.post("/api/unchecked-cards/live-check-selected", requireAuth, requirePermiss
     if (!card) {
       results.push({ id, status: "not_found", live: false, error: "Unchecked card not found" });
     } else if (!card.panEncrypted) {
-      results.push({ id, maskedPan: card.maskedPan, status: "skipped", live: false, error: "Card PAN is not available for live check" });
+      results.push({ id, maskedPan: safeCheckedLiveMaskedPan(card), status: "skipped", live: false, error: "Card PAN is not available for live check" });
     } else {
       try {
         results.push(await runEncryptedUncheckedCardCheck({ mongo, card, body: req.body, userId: req.user?.id || null }));
@@ -6369,7 +6773,7 @@ app.post("/api/unchecked-cards/live-check-selected", requireAuth, requirePermiss
         );
         results.push({
           id: card.id,
-          maskedPan: card.maskedPan,
+          maskedPan: safeCheckedLiveMaskedPan(card),
           checked: true,
           live: false,
           ...operatorResult,
@@ -6433,7 +6837,7 @@ app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("can
       );
       results.push({
         id: card.id,
-        maskedPan: card.maskedPan,
+        maskedPan: safeCheckedLiveMaskedPan(card),
         checked: true,
         live: false,
         ...operatorResult,
@@ -6455,17 +6859,27 @@ app.post("/api/unchecked-cards/check-range", requireAuth, requirePermission("can
 
 app.get("/api/checked-live-cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
   const mongo = await db.getDb();
+  await syncCheckedLiveCardsFromUnchecked(mongo);
   const { page, pageSize, skip } = paginationFromQuery(req.query);
-  const filter = {};
+  const filter = {
+    $or: [
+      { providerReferenceId: { $exists: true, $nin: [null, ""] } },
+      { authStatus: "authorized" },
+      { captureStatus: "captured" },
+      { capture: true }
+    ]
+  };
   if (req.query.q) {
     const q = String(req.query.q).trim();
-    filter.$or = [
+    filter.$and = [{
+      $or: [
       { maskedPan: { $regex: q, $options: "i" } },
       { bin: { $regex: q, $options: "i" } },
       { last4: { $regex: q, $options: "i" } },
       { bank: { $regex: q, $options: "i" } },
       { provider: { $regex: q, $options: "i" } }
-    ];
+      ]
+    }];
   }
 
   const [rows, total] = await Promise.all([
@@ -6478,7 +6892,10 @@ app.get("/api/checked-live-cards", requireAuth, requirePermission("canListCards"
   ]);
 
   res.json({
-    rows,
+    rows: rows.map((card) => ({
+      ...card,
+      maskedPan: safeCheckedLiveMaskedPan(card)
+    })),
     total,
     page,
     pageSize,
@@ -6668,6 +7085,114 @@ app.post("/api/checked-cards/:cardId/amazonpay/action", requireAuth, requirePerm
   });
 }));
 
+app.post("/api/checked-cards/:cardId/action", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const allowed = new Set(["capture", "live", "auth", "authorize", "balance", "sale", "void"]);
+  const requestedOperation = String(req.body.operation || "").toLowerCase();
+  if (!allowed.has(requestedOperation)) {
+    return res.status(400).json({ status: "failed", responseMessage: "Unsupported checked-card action" });
+  }
+
+  const mongo = await db.getDb();
+  const card = await mongo.collection("CheckedCards").findOne(
+    { id: req.params.cardId },
+    { projection: checkedCardsProjection() }
+  );
+  if (!card) {
+    return res.status(404).json({ status: "failed", responseMessage: "Checked card not found" });
+  }
+
+  const provider = normalizeProviderKey(req.body.provider || card.provider || card.lastLiveProvider || "clover");
+  if (provider === "amazonpay") {
+    return res.status(400).json({
+      status: "failed",
+      responseMessage: "Use the Amazon Pay checked-card action endpoint for this record",
+      provider,
+      operation: requestedOperation
+    });
+  }
+
+  const expMonth = card.expMonth || null;
+  const expYear = card.expYear || null;
+  let unchecked = card.uncheckedCardId
+    ? await mongo.collection("uncheckedCards").findOne({ id: card.uncheckedCardId }, { projection: { _id: 0 } })
+    : null;
+  if (!unchecked) {
+    unchecked = await mongo.collection("uncheckedCards").findOne({
+      bin: card.first6,
+      last4: card.last4,
+      ...(expMonth ? { expMonth: { $in: expLookupValues(expMonth) } } : {}),
+      ...(expYear ? { expYear: { $in: expLookupValues(expYear) } } : {}),
+      panEncrypted: { $exists: true, $ne: null }
+    }, { projection: { _id: 0 } });
+  }
+
+  let providerCard = {
+    ...card,
+    bin: card.first6,
+    providerReferenceId: req.body.transactionId || req.body.retref || card.providerReferenceId || card.providerRef,
+    providerPaymentToken: req.body.providerPaymentToken || card.providerPaymentToken
+  };
+  if (unchecked?.panEncrypted) {
+    providerCard = {
+      ...providerCard,
+      uncheckedCardId: unchecked.id,
+      pan: decrypt(unchecked.panEncrypted),
+      cvv: unchecked.cvvEncrypted ? decrypt(unchecked.cvvEncrypted) : undefined,
+      expMonth: unchecked.expMonth || expMonth,
+      expYear: unchecked.expYear || expYear,
+      zip: unchecked.zip || card.zip || "00000",
+      holderName: unchecked.holderName || card.holderName
+    };
+  }
+
+  const providerOperation = requestedOperation === "authorize" ? "auth" : requestedOperation;
+  const { httpStatus, payload } = await runMaskedCardProviderOperation(
+    req,
+    providerCard,
+    provider,
+    providerOperation,
+    req.body
+  );
+  const approved = isLiveOperationResponse(payload || {}, httpStatus);
+  const now = new Date().toISOString();
+  const patch = {
+    provider,
+    lastLiveProvider: provider,
+    lastLiveOperation: providerOperation,
+    lastLiveMessage: payload?.responseMessage || payload?.failureReason || payload?.result?.responseMessage || null,
+    lastLiveResultCode: payload?.resultCode || payload?.result?.resultCode || null,
+    updatedAt: now
+  };
+  if (unchecked?.id) patch.uncheckedCardId = unchecked.id;
+  if (providerOperation === "live") patch.verifyStatus = approved ? "verified" : "review";
+  if (providerOperation === "balance") patch.balanceStatus = approved ? "verified" : "review";
+  if (providerOperation === "auth") patch.authStatus = approved ? "authorized" : "review";
+
+  await mongo.collection("CheckedCards").updateOne({ id: card.id }, { $set: patch });
+  await writeAuditLog({
+    entityType: "checked_card",
+    entityId: card.id,
+    action: `checked_card_${providerOperation}`,
+    status: approved ? "success" : (payload?.status || "review"),
+    actorUserId: req.user?.id || null,
+    details: redactSensitiveReportData({
+      request: providerPayloadFromMaskedRecord(providerCard, provider, providerOperation, req.body),
+      response: payload,
+      checkedCardPatch: patch
+    })
+  });
+
+  res.status(httpStatus).json({
+    ...payload,
+    checkedCard: {
+      id: card.id,
+      provider,
+      operation: providerOperation,
+      state: patch
+    }
+  });
+}));
+
 app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
   const allowed = new Set(["capture", "live", "auth", "authorize", "balance"]);
   const operation = String(req.body.operation || "").toLowerCase();
@@ -6719,7 +7244,7 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
       actorUserId: req.user?.id || null,
       details: {
         checkedCardPatch: statePatch,
-        maskedPan: card.maskedPan
+        maskedPan: safeCheckedLiveMaskedPan(card)
       }
     });
 
@@ -6737,24 +7262,54 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
     });
   }
 
-  const providerCard = {
+  const providerCard = await enrichCheckedLiveCardForProviderAction(mongo, {
     ...card,
     providerReferenceId: req.body.transactionId || req.body.retref || card.providerReferenceId,
     providerPaymentToken: req.body.providerPaymentToken || card.providerPaymentToken
-  };
+  }, provider, req.body);
   const providerOperation = operation === "authorize" ? "auth" : operation;
   const { httpStatus, payload } = await runMaskedCardProviderOperation(req, providerCard, provider, providerOperation, req.body);
+  const providerResult = payload?.result || payload?.providerResponse || payload || {};
+  const approved = isLiveOperationResponse(providerResult, httpStatus) || isLiveOperationResponse(payload, httpStatus);
+  const nextReference = providerResult.providerReferenceId ||
+    providerResult.transactionId ||
+    providerResult.cloverChargeId ||
+    providerResult.pnref ||
+    payload?.providerReferenceId ||
+    payload?.transactionId ||
+    card.providerReferenceId ||
+    null;
+  const lastAmount = req.body.displayAmount ?? providerResult.amount ?? payload?.amount ?? req.body.amount ?? null;
+  const lastCurrency = String(providerResult.currency || payload?.currency || req.body.currency || "USD").toUpperCase();
+  const lastMessage = providerResult.responseMessage ||
+    providerResult.failureReason ||
+    payload?.responseMessage ||
+    payload?.failureReason ||
+    null;
   const now = new Date().toISOString();
   const statePatch = {
     provider,
     lastAction: providerOperation,
+    providerReferenceId: nextReference,
+    lastAmount,
+    lastCurrency,
+    lastMessage,
+    lastResultCode: providerResult.resultCode || payload?.resultCode || null,
     lastResult: redactSensitiveReportData(payload || {}),
     updatedAt: now
   };
-  if (providerOperation === "capture") statePatch.capture = isLiveOperationResponse(payload, httpStatus);
-  if (providerOperation === "auth") statePatch.auth = isLiveOperationResponse(payload, httpStatus);
-  if (providerOperation === "live") statePatch.live = isLiveOperationResponse(payload, httpStatus);
-  if (providerOperation === "balance") statePatch.balance = isLiveOperationResponse(payload, httpStatus) ? "checked" : "review";
+  if (providerOperation === "capture") {
+    statePatch.capture = approved;
+    statePatch.captureStatus = approved ? "captured" : "review";
+  }
+  if (providerOperation === "auth") {
+    statePatch.auth = approved;
+    statePatch.authStatus = approved ? "authorized" : "review";
+    statePatch.authAmount = lastAmount;
+    statePatch.authCurrency = lastCurrency;
+  }
+  if (providerOperation === "live") statePatch.live = approved;
+  if (providerOperation === "balance") statePatch.balance = approved ? "checked" : "review";
 
   await mongo.collection("checkedLiveCards").updateOne({ id: card.id }, { $set: statePatch });
   res.status(httpStatus).json(payload);
@@ -7078,6 +7633,53 @@ app.post("/api/providers/paypal/nvp/test", requireAuth, requirePermission("canLi
       correlationId: result.correlationId
     }
   });
+  res.json(result);
+}));
+
+app.post("/api/providers/paypal/sandbox/orders/card-authorize", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
+  const result = await paypalService.createSandboxCardAuthorizationOrder({
+    ...req.body,
+    ipAddress: req.ip
+  });
+
+  await insertProviderAttempt({
+    cardId: getSavedCardId(req.body.cardId) || null,
+    provider: "paypal",
+    attemptType: "auth_check",
+    status: result.status,
+    amount: result.amount,
+    currency: result.currency,
+    providerReferenceId: result.authorizationId || result.orderId || null,
+    rawResponse: {
+      processor: result.processor,
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      orderId: result.orderId,
+      authorizationId: result.authorizationId,
+      authorizationStatus: result.authorizationStatus,
+      card: result.card
+    },
+    createdByUserId: req.user.id
+  });
+
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "paypal-sandbox-order",
+    action: "paypal_sandbox_order_authorize",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: {
+      processor: result.processor,
+      resultCode: result.resultCode,
+      responseMessage: result.responseMessage,
+      orderId: result.orderId,
+      authorizationId: result.authorizationId,
+      amount: result.amount,
+      currency: result.currency,
+      card: result.card
+    }
+  });
+
   res.json(result);
 }));
 
@@ -7691,7 +8293,16 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
   const limit = Math.min(500, Math.max(1, Number(req.query.limit || 100)));
   const canViewJsonModels = req.user?.role === "admin";
   const database = await db.getDb();
-  const catalog = getProviderReportCatalog().filter((item) => item.group === "payment_gateways");
+  const rawCatalog = getProviderReportCatalog().filter((item) => item.group === "payment_gateways");
+  const paypalReport = rawCatalog.find((item) => item.key === "paypal");
+  const braintreeReport = rawCatalog.find((item) => item.key === "braintree");
+  const catalog = [{
+    key: "unifiedpayments",
+    group: "payment_gateways",
+    label: "PayPal + Braintree Unified",
+    configured: Boolean(paypalReport?.configured || braintreeReport?.configured),
+    capabilities: ["token_auth_void", "single_select", "batch_select"]
+  }, ...rawCatalog.filter((item) => !["paypal", "braintree"].includes(item.key))];
   const processorKeys = new Set(catalog.map((item) => item.key));
   const query = {};
 
@@ -7699,6 +8310,8 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
     if (processor === "rapidapi_bin_checker") {
       query.provider = "paypal";
       query.attempt_type = "bin_check";
+    } else if (processor === "unifiedpayments") {
+      query.provider = { $in: ["paypal", "braintree"] };
     } else if (processorKeys.has(processor)) {
       query.provider = processor;
     } else {
@@ -7827,11 +8440,11 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
 
   const [attemptTypesResult, statusesResult] = await Promise.all([
     database.collection("verification_attempts").aggregate([
-      ...(processor ? [{ $match: { provider: processor } }] : []),
+      ...(processor ? [{ $match: { provider: processor === "unifiedpayments" ? { $in: ["paypal", "braintree"] } : processor } }] : []),
       { $group: { _id: "$attempt_type" } }
     ]).toArray(),
     database.collection("verification_attempts").aggregate([
-      ...(processor ? [{ $match: { provider: processor } }] : []),
+      ...(processor ? [{ $match: { provider: processor === "unifiedpayments" ? { $in: ["paypal", "braintree"] } : processor } }] : []),
       { $group: { _id: "$status" } }
     ]).toArray()
   ]);
@@ -7859,7 +8472,16 @@ app.get("/api/payment-processors/logs", requireAuth, requirePermission("canListC
       label: item.label,
       configured: item.configured,
       capabilities: item.capabilities,
-      health: paymentProcessorHealth.processors[item.key] || {
+      health: item.key === "unifiedpayments" ? {
+        key: item.key,
+        label: item.label,
+        status: [paymentProcessorHealth.processors.paypal?.status, paymentProcessorHealth.processors.braintree?.status].includes("healthy")
+          ? "healthy"
+          : (item.configured ? "configured" : "unhealthy"),
+        healthy: [paymentProcessorHealth.processors.paypal?.healthy, paymentProcessorHealth.processors.braintree?.healthy].includes(true),
+        configured: item.configured,
+        checkedAt: paymentProcessorHealth.checkedAt
+      } : paymentProcessorHealth.processors[item.key] || {
         key: item.key,
         label: item.label,
         status: paymentProcessorHealth.running ? "checking" : "unknown",

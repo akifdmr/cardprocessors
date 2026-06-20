@@ -18,6 +18,7 @@ function getPublicProviderConfig() {
     },
     paypal: {
       baseUrl: env.providers.paypal.baseUrl,
+      environment: env.providers.paypal.environment,
       restConfigured: Boolean(
         env.providers.paypal.clientId &&
         env.providers.paypal.clientSecret

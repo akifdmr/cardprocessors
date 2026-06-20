@@ -150,6 +150,9 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
   }
 
   async function executeProcessorRequest(provider, method, body) {
+    if (provider === 'paypal' && method.operation === 'sandbox_order_auth') {
+      return api('/providers/paypal/sandbox/orders/card-authorize', { method: 'POST', body: JSON.stringify(body) })
+    }
     if (method.operation === 'amount_sequence') {
       body.amounts = [body.sequenceAmount1 || '1,100.12', body.sequenceAmount2 || '1,100.25']
       delete body.amount
@@ -346,9 +349,9 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
   async function handleDropInResult(response) {
     setResult(response)
     await withLoader(() => load(), {
-      label: 'Braintree logları yenileniyor',
+      label: 'Unified processor logları yenileniyor',
       variant: 'logs',
-      detail: 'Drop-in işlem sonucu işlem kayıtlarına yansıtılıyor',
+      detail: 'Auth + void sonuçları işlem kayıtlarına yansıtılıyor',
     })
   }
 
@@ -369,6 +372,7 @@ export function PaymentProcessorsPage({ cards, catalog, refreshSignal, runAction
           onSelectOperation={selectOperation}
           onSubmit={submitOperation}
           onDropInResult={handleDropInResult}
+          runAction={withLoader}
         />
         {operation?.providerKey === 'amazonpay' ? (
           <AmazonPayFlowPanel

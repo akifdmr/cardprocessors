@@ -103,10 +103,13 @@ function offlineBinResult(bin, warning) {
   const normalizedBin = String(bin || '').replace(/\D/g, '').slice(0, 6)
   const network = offlineBinNetwork(normalizedBin)
   return {
-    status: 'passed',
+    status: 'limited',
     bin: normalizedBin || null,
     resultCode: 'CLIENT_OFFLINE_BIN_PREFIX_FALLBACK',
     source: 'client_offline_bin_prefix_fallback',
+    sourceLabel: 'Client offline card-network prefix',
+    confidence: 'low',
+    dataQuality: 'network_only',
     providerWarning: warning || null,
     summary: {
       bin: normalizedBin || null,
@@ -412,6 +415,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
       first6,
       bin: payload.bin || first6,
       provider: card.provider || payload.provider,
+      providerPaymentToken: card.provider_payment_token || payload.providerPaymentToken,
     }
   }
 

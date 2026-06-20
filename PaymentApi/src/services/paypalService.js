@@ -10,6 +10,24 @@ const RAPIDAPI_BIN_CHECKER_URL =
   process.env.RAPIDAPI_BIN_CHECKER_URL || `https://${RAPIDAPI_BIN_CHECKER_HOST}/`;
 const BIN_CHECKER_FALLBACK_URL =
   process.env.BIN_CHECKER_FALLBACK_URL || "https://lookup.binlist.net";
+const BIN_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const binResultCache = new Map();
+
+function cachedBinResult(bin) {
+  const entry = binResultCache.get(bin);
+  if (!entry || Date.now() - entry.cachedAt > BIN_CACHE_TTL_MS) {
+    binResultCache.delete(bin);
+    return null;
+  }
+  return JSON.parse(JSON.stringify(entry.result));
+}
+
+function rememberBinResult(bin, result, cacheable = true) {
+  if (cacheable && ["passed", "fallback"].includes(String(result?.status || "").toLowerCase())) {
+    binResultCache.set(bin, { cachedAt: Date.now(), result });
+  }
+  return result;
+}
 
 function getPayPalConfig() {
   return getProviderConfig("paypal");
@@ -96,6 +114,32 @@ function getManagerStatus() {
     user: manager.user || null,
     missing
   };
+}
+
+function isSandboxRestConfig(config = getPayPalConfig()) {
+  return String(config.environment || "").toLowerCase() === "sandbox" ||
+    String(config.baseUrl || "").includes("sandbox.paypal.com");
+}
+
+function requireRestConfig() {
+  const config = getPayPalConfig();
+  if (!config.clientId || !config.clientSecret) {
+    throw inputError("Missing PayPal REST client configuration");
+  }
+  return config;
+}
+
+function requireSandboxRestConfig() {
+  const config = requireRestConfig();
+  if (!isSandboxRestConfig(config)) {
+    throw inputError("PayPal REST card order authorization is sandbox-only. Set PAYPAL_ENV=sandbox and use sandbox REST credentials.");
+  }
+  return config;
+}
+
+function isSandboxRestConfigured() {
+  const config = getPayPalConfig();
+  return Boolean(config.clientId && config.clientSecret && isSandboxRestConfig(config));
 }
 
 function getNestedValue(source, path) {
@@ -285,6 +329,24 @@ function summarizeBinDetails(bin, responseData) {
   };
 }
 
+function normalizeBinSummary(summary = {}) {
+  const countryAliases = {
+    "United States of America (the)": "United States",
+    "Viet Nam": "Vietnam",
+    "Türkiye": "Turkey"
+  };
+  return {
+    ...summary,
+    country: countryAliases[summary.country] || summary.country || null,
+    issuer: summary.issuer || null,
+    scheme: summary.scheme || summary.brand || null,
+    brand: summary.brand || summary.scheme || null,
+    type: summary.type || null,
+    level: summary.level || null,
+    currency: summary.currency || null
+  };
+}
+
 function formatIpDetails(responseData) {
   const lookup = getIpPayload(responseData);
   const proxy = lookup.proxy || {};
@@ -328,6 +390,13 @@ async function binCheckCard({ pan, bin, ip }) {
     throw inputError("BIN/IIN must be 6 digits");
   }
   const lookupIp = String(ip || "").trim();
+  const cached = lookupIp ? null : cachedBinResult(normalized);
+  if (!lookupIp && cached) {
+    return {
+      ...cached,
+      cached: true
+    };
+  }
   const requestBody = lookupIp
     ? { bin: normalized, ip: lookupIp }
     : { bin: normalized };
@@ -377,34 +446,55 @@ async function binCheckCard({ pan, bin, ip }) {
           }
         }
       };
-      return {
-        status: "passed",
+      const summary = normalizeBinSummary(summarizeBinDetails(normalized, fallbackData));
+      return rememberBinResult(normalized, {
+        status: "fallback",
         bin: normalized,
         ip: lookupIp || null,
-        summary: summarizeBinDetails(normalized, fallbackData),
+        resultCode: "BINLIST_FALLBACK",
+        confidence: "medium",
+        dataQuality: "partial",
+        sourceLabel: "BINList fallback",
+        summary: {
+          ...summary,
+          usefulLabel: [summary.country, summary.issuer, summary.type, summary.brand].filter(Boolean).join(" / ")
+        },
         details: formatBinDetails(normalized, fallbackData),
         ipDetails: lookupIp ? formatIpDetails({}) : null,
         source: "binlist_fallback",
         providerWarning: getProviderMessage(rapidApiError),
         raw: fallback.data || {}
-      };
+      }, !lookupIp);
     } catch (fallbackError) {
       const providerMessage = getProviderMessage(rapidApiError);
       const offlineData = formatOfflineBinData(normalized);
-      return {
-        status: "passed",
+      const summary = normalizeBinSummary(summarizeBinDetails(normalized, offlineData));
+      return rememberBinResult(normalized, {
+        status: "limited",
         bin: normalized,
         ip: lookupIp || null,
         resultCode: "OFFLINE_BIN_PREFIX_FALLBACK",
+        confidence: "low",
+        dataQuality: "network_only",
+        sourceLabel: "Offline card-network prefix",
         providerStatus: rapidApiError?.response?.status || null,
         providerWarning: providerMessage,
         fallbackError: getProviderMessage(fallbackError),
-        summary: summarizeBinDetails(normalized, offlineData),
+        summary: {
+          ...summary,
+          country: null,
+          countryCode: null,
+          issuer: null,
+          type: null,
+          level: null,
+          currency: null,
+          usefulLabel: summary.brand || summary.scheme || "Unknown network"
+        },
         details: formatBinDetails(normalized, offlineData),
         ipDetails: lookupIp ? formatIpDetails({}) : null,
         source: "offline_bin_prefix_fallback",
         raw: rapidApiError?.response?.data || null
-      };
+      }, !lookupIp);
     }
   }
 
@@ -414,16 +504,23 @@ async function binCheckCard({ pan, bin, ip }) {
   const success = normalizeBoolean(pickFirst(responseData, ["success"], true));
   const code = Number(responseData.code || response.status || 200);
 
-  return {
+  const summary = normalizeBinSummary(summarizeBinDetails(normalized, responseData));
+  return rememberBinResult(normalized, {
     status: valid === false || success === false || code >= 400 ? "failed" : "passed",
     bin: normalized,
     ip: lookupIp || null,
-    summary: summarizeBinDetails(normalized, responseData),
+    confidence: valid === false || success === false || code >= 400 ? "low" : "high",
+    dataQuality: "full",
+    sourceLabel: "RapidAPI BIN/IP Checker",
+    summary: {
+      ...summary,
+      usefulLabel: [summary.country, summary.issuer, summary.type, summary.brand].filter(Boolean).join(" / ")
+    },
     details: formatBinDetails(normalized, responseData),
     ipDetails: lookupIp ? formatIpDetails(responseData) : null,
     source: "rapidapi_bin_ip_checker",
     raw: responseData
-  };
+  }, !lookupIp);
 }
 
 function parseNvpResponse(text) {
@@ -506,6 +603,21 @@ function splitCardholderName(payload) {
   };
 }
 
+function paypalExpiry(expMonth, expYear) {
+  const { month, year } = normalizeExpiryParts(expMonth, expYear);
+  return `${year}-${month}`;
+}
+
+function paypalBillingAddress(payload = {}) {
+  return removeEmptyFields({
+    address_line_1: payload.billingAddressLine1 || payload.street || payload.address,
+    admin_area_2: payload.billingCity || payload.city,
+    admin_area_1: payload.billingState || payload.state,
+    postal_code: payload.billingZip || payload.zip || payload.postalCode || "00000",
+    country_code: String(payload.billingCountry || payload.countryCode || "US").toUpperCase()
+  });
+}
+
 function buildDirectPaymentRequest(payload, paymentAction) {
   const validation = validateCardInput({
     pan: payload.pan || payload.cardNumber,
@@ -581,6 +693,317 @@ async function submitNvpRequest(params) {
   );
 
   return parseNvpResponse(response.data);
+}
+
+async function getRestAccessToken(config = requireRestConfig()) {
+  const response = await axios.post(
+    `${config.baseUrl}/v1/oauth2/token`,
+    "grant_type=client_credentials",
+    {
+      auth: {
+        username: config.clientId,
+        password: config.clientSecret
+      },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      timeout: 15000
+    }
+  );
+
+  return response.data.access_token;
+}
+
+async function getVaultedPaymentMethodMetadata(payload = {}) {
+  const paymentTokenId = String(
+    payload.paymentTokenId ||
+    payload.providerPaymentToken ||
+    payload.vaultId ||
+    payload.token ||
+    ""
+  ).trim();
+  if (!paymentTokenId) {
+    throw inputError("PayPal paymentTokenId is required");
+  }
+  if (/^manual:/i.test(paymentTokenId)) {
+    const error = inputError(
+      "Stored PayPal token is a local placeholder, not a PayPal Vault payment token"
+    );
+    error.code = "PAYPAL_VAULT_TOKEN_REQUIRED";
+    throw error;
+  }
+
+  const config = requireRestConfig();
+  const accessToken = await getRestAccessToken(config);
+  const response = await axios.get(
+    `${config.baseUrl}/v3/vault/payment-tokens/${encodeURIComponent(paymentTokenId)}`,
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        accept: "application/json"
+      },
+      timeout: 15000
+    }
+  );
+  const card = response.data?.payment_source?.card || {};
+  return {
+    status: "verified",
+    source: "paypal_vault",
+    sourceLabel: "PayPal Vault",
+    paymentTokenId: response.data?.id || paymentTokenId,
+    card: {
+      name: card.name || null,
+      brand: card.brand || null,
+      last4: card.last_digits || null,
+      expiry: card.expiry || null,
+      countryCode: card.billing_address?.country_code || null
+    }
+  };
+}
+
+function extractOrderAuthorization(order = {}) {
+  const units = Array.isArray(order.purchase_units) ? order.purchase_units : [];
+  for (const unit of units) {
+    const authorizations = unit.payments?.authorizations || [];
+    if (authorizations.length) return authorizations[0];
+  }
+  return null;
+}
+
+function sandboxOrderCardSnapshot(validation = {}) {
+  return {
+    first6: validation.first6,
+    last4: validation.last4,
+    brand: validation.brand,
+    maskedPan: validation.maskedPan
+  };
+}
+
+async function createSandboxCardAuthorizationOrder(payload = {}) {
+  const config = requireSandboxRestConfig();
+  const validation = validateCardInput({
+    pan: payload.pan || payload.cardNumber,
+    expMonth: payload.expMonth,
+    expYear: payload.expYear,
+    cardholderName: payload.cardholderName,
+    billingZip: payload.billingZip || payload.zip
+  });
+
+  if (!validation.isValid) {
+    throw inputError(`Invalid card input: ${validation.issues.join(", ")}`);
+  }
+
+  const amount = formatAmount(payload.amount || "1.00");
+  const currency = String(payload.currency || "USD").toUpperCase();
+  const invoiceNumber = payload.invoiceNumber || `sandbox-${uuidv4().replace(/-/g, "").slice(0, 20)}`;
+  const token = await getRestAccessToken(config);
+  const orderRequest = {
+    intent: "AUTHORIZE",
+    purchase_units: [{
+      reference_id: payload.reference || invoiceNumber,
+      description: payload.description || "CardMarket sandbox dummy authorization order",
+      invoice_id: invoiceNumber,
+      amount: {
+        currency_code: currency,
+        value: amount
+      }
+    }],
+    payment_source: {
+      card: removeEmptyFields({
+        number: validation.normalizedPan,
+        expiry: paypalExpiry(payload.expMonth, payload.expYear),
+        security_code: payload.cvv2 || payload.cvv || payload.cvc,
+        name: payload.cardholderName || "Sandbox Cardholder",
+        billing_address: paypalBillingAddress(payload),
+        attributes: {
+          verification: {
+            method: "SCA_WHEN_REQUIRED"
+          }
+        }
+      })
+    }
+  };
+
+  const createResponse = await axios.post(
+    `${config.baseUrl}/v2/checkout/orders`,
+    orderRequest,
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        prefer: "return=representation",
+        "paypal-request-id": uuidv4()
+      },
+      timeout: 30000
+    }
+  );
+
+  let order = createResponse.data || {};
+  let authorization = extractOrderAuthorization(order);
+  let authorizeError = null;
+  if (!authorization && order.id) {
+    try {
+      const authorizeResponse = await axios.post(
+        `${config.baseUrl}/v2/checkout/orders/${encodeURIComponent(order.id)}/authorize`,
+        {},
+        {
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            prefer: "return=representation",
+            "paypal-request-id": uuidv4()
+          },
+          timeout: 30000
+        }
+      );
+      order = authorizeResponse.data || order;
+      authorization = extractOrderAuthorization(order);
+    } catch (error) {
+      authorizeError = {
+        status: error.response?.status || null,
+        message: getProviderMessage(error),
+        data: error.response?.data ? {
+          name: error.response.data.name,
+          message: error.response.data.message,
+          details: error.response.data.details
+        } : null
+      };
+    }
+  }
+
+  return {
+    status: authorization?.status ? String(authorization.status).toLowerCase() : String(order.status || "created").toLowerCase(),
+    resultCode: order.status || authorization?.status || null,
+    responseMessage: authorization
+      ? "PayPal sandbox order authorization created"
+      : "PayPal sandbox order created; authorization may require payer action or account capability review",
+    processor: "paypal_rest_sandbox_orders",
+    orderId: order.id || null,
+    authorizationId: authorization?.id || null,
+    authorizationStatus: authorization?.status || null,
+    amount,
+    currency,
+    invoiceNumber,
+    card: sandboxOrderCardSnapshot(validation),
+    links: Array.isArray(order.links) ? order.links.map((link) => ({ rel: link.rel, href: link.href, method: link.method })) : [],
+    authorizeError,
+    raw: {
+      id: order.id,
+      status: order.status,
+      intent: order.intent,
+      purchase_units: order.purchase_units,
+      payment_source: order.payment_source ? { card: { brand: order.payment_source.card?.brand, last_digits: order.payment_source.card?.last_digits } } : undefined
+    }
+  };
+}
+
+async function authorizeVaultedPaymentMethod(payload = {}) {
+  const config = requireSandboxRestConfig();
+  const vaultId = String(payload.vaultId || payload.paymentMethodToken || payload.token || "").trim();
+  if (!vaultId) {
+    throw inputError("vaultId is required");
+  }
+
+  const amount = formatAmount(payload.amount || "1.00");
+  const currency = String(payload.currency || "USD").toUpperCase();
+  const token = await getRestAccessToken(config);
+  const requestId = uuidv4();
+  const createResponse = await axios.post(
+    `${config.baseUrl}/v2/checkout/orders`,
+    {
+      intent: "AUTHORIZE",
+      purchase_units: [{
+        reference_id: payload.reference || requestId,
+        amount: {
+          currency_code: currency,
+          value: amount
+        }
+      }],
+      payment_source: {
+        card: {
+          vault_id: vaultId
+        }
+      }
+    },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        prefer: "return=representation",
+        "paypal-request-id": requestId
+      },
+      timeout: 30000
+    }
+  );
+
+  let order = createResponse.data || {};
+  if (!extractOrderAuthorization(order) && order.id) {
+    const authorizeResponse = await axios.post(
+      `${config.baseUrl}/v2/checkout/orders/${encodeURIComponent(order.id)}/authorize`,
+      {},
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          prefer: "return=representation",
+          "paypal-request-id": uuidv4()
+        },
+        timeout: 30000
+      }
+    );
+    order = authorizeResponse.data || order;
+  }
+
+  const authorization = extractOrderAuthorization(order);
+  return {
+    status: authorization?.status
+      ? String(authorization.status).toLowerCase()
+      : String(order.status || "failed").toLowerCase(),
+    resultCode: authorization?.status || order.status || null,
+    responseMessage: authorization
+      ? "PayPal vaulted payment method authorized"
+      : "PayPal order did not return an authorization",
+    processor: "paypal_rest_vault_authorize",
+    orderId: order.id || null,
+    authorizationId: authorization?.id || null,
+    transactionId: authorization?.id || null,
+    amount,
+    currency,
+    raw: order
+  };
+}
+
+async function voidRestAuthorization(payload = {}) {
+  const config = requireSandboxRestConfig();
+  const authorizationId = String(payload.authorizationId || payload.transactionId || "").trim();
+  if (!authorizationId) {
+    throw inputError("authorizationId is required");
+  }
+
+  const token = await getRestAccessToken(config);
+  const response = await axios.post(
+    `${config.baseUrl}/v2/payments/authorizations/${encodeURIComponent(authorizationId)}/void`,
+    {},
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "paypal-request-id": uuidv4()
+      },
+      timeout: 30000,
+      validateStatus: (status) => status >= 200 && status < 300
+    }
+  );
+
+  return {
+    status: "approved",
+    resultCode: response.status === 204 ? "VOIDED" : String(response.status),
+    responseMessage: "PayPal authorization voided",
+    processor: "paypal_rest_authorization_void",
+    authorizationId,
+    transactionId: authorizationId
+  };
 }
 
 async function submitManagerRequest(params) {
@@ -731,18 +1154,13 @@ async function testNvpConnection() {
 }
 
 async function testRestConnection() {
-  const config = getPayPalConfig();
-  if (!config.clientId || !config.clientSecret) {
-    throw inputError("Missing PayPal REST client configuration");
-  }
-
   const response = await axios.post(
-    `${config.baseUrl}/v1/oauth2/token`,
+    `${requireRestConfig().baseUrl}/v1/oauth2/token`,
     "grant_type=client_credentials",
     {
       auth: {
-        username: config.clientId,
-        password: config.clientSecret
+        username: requireRestConfig().clientId,
+        password: requireRestConfig().clientSecret
       },
       headers: {
         accept: "application/json",
@@ -801,15 +1219,20 @@ async function liveCheckCard(payload) {
 
 module.exports = {
   authorizeCardNvp,
+  authorizeVaultedPaymentMethod,
   binCheckCard,
   captureAuthorizationNvp,
+  createSandboxCardAuthorizationOrder,
   getManagerStatus,
   getNvpStatus: getNvpStatusSummary,
+  getVaultedPaymentMethodMetadata,
+  isSandboxRestConfigured,
   inquireManagerTransaction,
   liveCheckCard,
   saleCardNvp,
   testManagerConnection,
   testNvpConnection,
   testRestConnection,
+  voidRestAuthorization,
   voidAuthorizationNvp
 };

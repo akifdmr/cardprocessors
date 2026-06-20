@@ -6,7 +6,6 @@ import { AppShell } from './components/layout/AppShell'
 import { LoginPage } from './features/auth/LoginPage'
 import { CardsPage } from './features/cards/CardsPage'
 import { CheckersPage } from './features/checkers/CheckersPage'
-import { CheckedCardsPage } from './features/checked/CheckedCardsPage'
 import { UncheckedCardsPage } from './features/unchecked/UncheckedCardsPage'
 import { PaymentProcessorsPage } from './features/processors/PaymentProcessorsPage'
 import { DebtManagementPage } from './features/debt/DebtManagementPage'
@@ -114,7 +113,6 @@ export default function App() {
     <>
       <AppShell user={user} route={route} setRoute={setRoute} onLogout={logout}>
         {route === 'checkers' && <CheckersPage cards={cards} onRefreshCards={refreshCards} runAction={run} />}
-        {route === 'checked-cards' && <CheckedCardsPage runAction={run} />}
         {route === 'unchecked-cards' && <UncheckedCardsPage user={user} runAction={run} />}
         {route === 'payment-processors' && (
           <PaymentProcessorsPage cards={cards} catalog={catalog} refreshSignal={refreshSignal} runAction={run} />

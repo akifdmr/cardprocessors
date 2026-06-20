@@ -25,8 +25,13 @@ const amazonPaySandbox = amazonPayPublicKeyId.toUpperCase().startsWith("SANDBOX"
       : false;
 const databaseName = process.env.MONGODB_DATABASE || "cloverapp";
 
+function usableEnvValue(value) {
+  const text = String(value || "").trim();
+  return text && text !== "..." && !/^<.+>$/.test(text) ? text : "";
+}
+
 function requireEnv(name) {
-  const value = process.env[name];
+  const value = usableEnvValue(process.env[name]);
   if (!value) {
     console.error(`:${process.env.NODE_ENV} ortaminda eksik veya tanimsiz element var: ${name}`);
     // throw new Error(`:${process.env} ortaminda eksik veya tanimsiz element var`);
@@ -35,7 +40,7 @@ function requireEnv(name) {
 }
 
 function optionalEnv(name, fallback = "") {
-  return process.env[name] || fallback;
+  return usableEnvValue(process.env[name]) || fallback;
 }
 
 const globalPaymentsKeyType = optionalEnv("GLOBALPAYMENTS_KEY_TYPE").toUpperCase();
@@ -84,8 +89,8 @@ function mongoClientCertificateKeyFile() {
 
 function getRawDatabaseUrl() {
   return optionalEnv("DATABASE_URL") ||
-    optionalEnv("MONGODB_URI") ||
     optionalEnv("MONGODB_CONNECTIONSTRING") ||
+    optionalEnv("MONGODB_URI") ||
     optionalEnv("MONGO_URL");
 }
 
@@ -149,7 +154,11 @@ module.exports = {
       apiKey: optionalEnv("CLOVER_ECOMM_PRIVATE_TOKEN")
     },
     paypal: {
-      baseUrl: optionalEnv("PAYPAL_API_BASE_URL", "https://api-m.paypal.com"),
+      environment: paypalEnv,
+      baseUrl: optionalEnv(
+        "PAYPAL_API_BASE_URL",
+        paypalEnv === "sandbox" ? "https://api-m.sandbox.paypal.com" : "https://api-m.paypal.com"
+      ),
       clientId: optionalEnv("PAYPAL_CLIENT_ID"),
       clientSecret: optionalEnv("PAYPAL_CLIENT_SECRET"),
       nvp: {

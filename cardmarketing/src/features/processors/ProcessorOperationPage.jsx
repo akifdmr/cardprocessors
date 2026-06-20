@@ -1,25 +1,21 @@
-import { BraintreeDropInPage } from './BraintreeDropInPage'
 import { ProcessorOperationForm } from './ProcessorOperationForm'
+import { UnifiedPaymentsPage } from './UnifiedPaymentsPage'
 
 function methodsFor(catalog, providerKey) {
   return catalog?.[providerKey]?.methods || (providerKey === 'propelrpay' ? catalog?.propelr?.methods : []) || []
 }
 
-export function ProcessorOperationPage({ providerKey, methodKey, catalog, cards, onBack, onSelectOperation, onSubmit, onDropInResult }) {
+export function ProcessorOperationPage({ providerKey, methodKey, catalog, cards, onBack, onSelectOperation, onSubmit, onDropInResult, runAction }) {
   const provider = catalog?.[providerKey] || (providerKey === 'propelrpay' ? catalog?.propelr : null)
   const methods = methodsFor(catalog, providerKey)
 
-  if (providerKey === 'braintree') {
+  if (providerKey === 'unifiedpayments') {
     return (
-      <BraintreeDropInPage
-        providerKey={providerKey}
-        methodKey={methodKey}
-        catalog={catalog}
+      <UnifiedPaymentsPage
         cards={cards}
         onBack={onBack}
-        onSelectOperation={onSelectOperation}
-        onSubmit={onSubmit}
-        onDropInResult={onDropInResult}
+        onResult={onDropInResult}
+        runAction={runAction}
       />
     )
   }

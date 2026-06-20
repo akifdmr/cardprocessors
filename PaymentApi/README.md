@@ -95,6 +95,32 @@ Swagger/OpenAPI dokumani:
 http://localhost:3000/docs
 ```
 
+OpenAPI JSON:
+
+```text
+http://localhost:3000/openapi.json
+```
+
+## Postman
+
+Repo icindeki import dosyalari:
+
+- `postman/CardMarket-PaymentApi.postman_collection.json`
+- `postman/CardMarket-Local.postman_environment.json`
+
+API uzerinden indirme adresleri:
+
+```text
+http://localhost:3000/api/meta/postman/collection
+http://localhost:3000/api/meta/postman/environment
+```
+
+Postman'de once environment dosyasini, sonra collection dosyasini import edin.
+Environment icindeki `baseUrl` degerini aktif porta gore ayarlayin, `username`
+ve `password` alanlarini uygulama kullanicisi credential'lariyla doldurun.
+Collection seviyesinde HTTP Basic Auth kullanilir; login veya API token alma
+adimi gerekmez. Production ortaminda credential tasimak icin HTTPS zorunludur.
+
 ## Manuel Calistirma Sirasi
 
 React build:

@@ -3,6 +3,61 @@ const cloverService = require("./cloverService");
 const amazonPayService = require("./amazonPayService");
 const paypalService = require("./paypalService");
 const liveCheckerService = require("./liveCheckerService");
+const { db } = require("../db");
+
+const BIN_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function enrichBinWithPayPalVault(result, payload = {}) {
+  if (
+    String(payload.provider || "").toLowerCase() !== "paypal" ||
+    !(payload.providerPaymentToken || payload.paymentTokenId || payload.vaultId)
+  ) {
+    return result;
+  }
+
+  let paypalVault;
+  try {
+    paypalVault = await paypalService.getVaultedPaymentMethodMetadata(payload);
+  } catch (error) {
+    const isLocalPlaceholder = error.code === "PAYPAL_VAULT_TOKEN_REQUIRED";
+    return {
+      ...result,
+      paypalVault: {
+        status: isLocalPlaceholder ? "not_vaulted" : "unavailable",
+        source: "paypal_vault",
+        sourceLabel: "PayPal Vault",
+        resultCode: error.code || "PAYPAL_VAULT_LOOKUP_FAILED",
+        error: error.message
+      }
+    };
+  }
+
+  return {
+    ...result,
+    sourceLabel: `${result.sourceLabel || result.source} + PayPal Vault`,
+    verificationSources: [
+      {
+        source: result.source,
+        label: result.sourceLabel || result.source,
+        role: "issuer_bin_metadata"
+      },
+      {
+        source: "paypal_vault",
+        label: "PayPal Vault",
+        role: "stored_card_metadata"
+      }
+    ],
+    paypalVault,
+    summary: {
+      ...result.summary,
+      brand: paypalVault.card?.brand || result.summary?.brand || null,
+      countryCode: paypalVault.card?.countryCode || result.summary?.countryCode || null,
+      paypalCardholder: paypalVault.card?.name || null,
+      paypalLast4: paypalVault.card?.last4 || null,
+      paypalExpiry: paypalVault.card?.expiry || null
+    }
+  };
+}
 
 function inputError(message) {
   const error = new Error(message);
@@ -97,10 +152,9 @@ function parseCardLine(line) {
 }
 
 function maskPan(pan) {
-  // const digits = digitsOnly(pan);
-  // if (digits.length < 10) return null;
-  // return `${digits.slice(0, 6)}******${digits.slice(-4)}`;
-  return pan;
+  const digits = digitsOnly(pan);
+  if (digits.length < 10) return null;
+  return `${digits.slice(0, 6)}******${digits.slice(-4)}`;
 }
 
 function recordHash(card) {
@@ -113,11 +167,102 @@ function recordHash(card) {
 
 async function binCheckCard(payload = {}) {
   const card = payload.pan || payload.cardNumber ? normalizeCardInput(payload) : payload;
-  return paypalService.binCheckCard({
+  const normalizedBin = digitsOnly(payload.bin || card.pan || payload.pan).slice(0, 6);
+  const hasIpLookup = Boolean(String(payload.ip || "").trim());
+  let database = null;
+  try {
+    database = await db.getDb();
+    const cached = hasIpLookup
+      ? null
+      : await database.collection("binLookupCache").findOne({ bin: normalizedBin }, { projection: { _id: 0 } });
+    if (cached?.result && Date.now() - new Date(cached.updatedAt).getTime() <= BIN_CACHE_MAX_AGE_MS) {
+      return enrichBinWithPayPalVault({
+        ...cached.result,
+        cached: true,
+        cacheSource: "mongodb"
+      }, payload);
+    }
+  } catch {
+    database = null;
+  }
+
+  const result = await paypalService.binCheckCard({
     pan: card.pan || payload.pan,
-    bin: payload.bin || digitsOnly(card.pan || payload.pan).slice(0, 6),
+    bin: normalizedBin,
     ip: payload.ip
   });
+
+  if (["limited", "failed"].includes(String(result.status || "").toLowerCase()) && database) {
+    const historical = await database.collection("uncheckedCards").findOne(
+      {
+        bin: normalizedBin,
+        $or: [
+          { bank: { $exists: true, $nin: [null, ""] } },
+          { countryCode: { $exists: true, $nin: [null, ""] } },
+          { cardType: { $exists: true, $nin: [null, ""] } }
+        ]
+      },
+      {
+        projection: {
+          _id: 0,
+          bank: 1,
+          countryCode: 1,
+          cardType: 1,
+          cardLevel: 1
+        }
+      }
+    );
+    if (historical) {
+      const network = result.summary?.brand || result.summary?.scheme || null;
+      const recovered = {
+        ...result,
+        status: "fallback",
+        resultCode: "LOCAL_BIN_HISTORY_FALLBACK",
+        source: "local_bin_history",
+        sourceLabel: "Local verified BIN history",
+        confidence: "medium",
+        dataQuality: "partial",
+        summary: {
+          ...result.summary,
+          bin: normalizedBin,
+          countryCode: historical.countryCode || null,
+          country: historical.countryCode || null,
+          issuer: historical.bank || null,
+          type: historical.cardType || null,
+          level: historical.cardLevel || null,
+          scheme: result.summary?.scheme || network,
+          brand: result.summary?.brand || network,
+          usefulLabel: [
+            historical.countryCode,
+            historical.bank,
+            historical.cardType,
+            historical.cardLevel,
+            network
+          ].filter(Boolean).join(" / ")
+        }
+      };
+      if (!hasIpLookup) {
+        await database.collection("binLookupCache").updateOne(
+          { bin: normalizedBin },
+          { $set: { bin: normalizedBin, result: recovered, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        );
+      }
+      return enrichBinWithPayPalVault(recovered, payload);
+    }
+  }
+
+  if (!hasIpLookup && database && ["passed", "fallback"].includes(String(result.status || "").toLowerCase())) {
+    const cacheResult = { ...result };
+    delete cacheResult.raw;
+    await database.collection("binLookupCache").updateOne(
+      { bin: normalizedBin },
+      { $set: { bin: normalizedBin, result: cacheResult, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+  }
+
+  return enrichBinWithPayPalVault(result, payload);
 }
 
 async function liveCheckCard(payload = {}) {
@@ -190,7 +335,6 @@ async function liveCheckCard(payload = {}) {
 }
 
 async function checkCard(payload = {}) {
-  const binCheck = await binCheckCard(payload);
   let live;
   try {
     live = await liveCheckCard(payload);
@@ -203,6 +347,18 @@ async function checkCard(payload = {}) {
       provider: String(payload.provider || "clover").toLowerCase(),
       operation: "live",
       isLive: false
+    };
+  }
+  let binCheck;
+  try {
+    binCheck = await binCheckCard(payload);
+  } catch (error) {
+    binCheck = {
+      status: "review",
+      error: error.message,
+      fallbackError: error.message,
+      source: "unavailable",
+      bin: digitsOnly(payload.pan || payload.cardNumber || payload.bin).slice(0, 6)
     };
   }
   return {
