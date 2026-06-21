@@ -39,7 +39,7 @@
     "build:api": "npm --prefix PaymentApi run build",
     "build:react": "npm --prefix cardmarketing run build",
     "build:all": "npm run build:react && npm run build:api",
-    "build:deploy": "npm --prefix cardmarketing run build && npm --prefix PaymentApi run build",
+    "build:deploy": "npm --prefix cardmarketing install && npm --prefix cardmarketing run build && npm --prefix PaymentApi run build",
     "start:deploy": "NODE_ENV=production APP_ENV=production npm --prefix PaymentApi run db:migrate && NODE_ENV=production APP_ENV=production npm --prefix PaymentApi run start"
   },
   "engines": {
@@ -60,5 +60,8 @@
   },
   "dependencies": {
     "axios": "^1.17.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
   }
 }
