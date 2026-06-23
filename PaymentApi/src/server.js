@@ -35,11 +35,14 @@ const callRoutes = require("./routers/callRoutes");
 const { createCloverLearningRouter } = require("./api/clover/learning/routes");
 const {
   SESSION_COOKIE_NAME,
+  PROJECT_KEYS,
   authenticate,
   createSession,
   ensureBootstrapAdmin,
   getEffectivePermissions,
+  getRequestProjectKey,
   hashPassword,
+  normalizeProjectKey,
   requireAuth,
   requirePermission,
   USER_PERMISSION_KEYS
@@ -1003,6 +1006,19 @@ function normalizePermissionOverrides(value = {}) {
       .filter((key) => typeof value[key] === "boolean")
       .map((key) => [key, value[key]])
   );
+}
+
+function normalizeProjectPermissions(value = {}) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const normalized = {};
+  for (const [key, permissions] of Object.entries(value)) {
+    const projectKey = normalizeProjectKey(key);
+    if (!PROJECT_KEYS.includes(projectKey)) continue;
+    normalized[projectKey] = normalizePermissionOverrides(permissions);
+  }
+  return normalized;
 }
 
 function deserializeRawResponse(rawResponse) {
@@ -3488,6 +3504,7 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
 app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const { username, password } = req.body;
+  const projectKey = getRequestProjectKey(req);
   if (!username || !password) {
     return sendApiError(res, req, 400, "username and password are required", "VALIDATION_ERROR");
   }
@@ -3506,7 +3523,9 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
       username: user.username,
       displayName: user.display_name,
       role: user.role,
-      permissions: getEffectivePermissions(user)
+      projectKey,
+      permissions: getEffectivePermissions(user, projectKey),
+      projectPermissions: user.project_permissions || {}
     }
   });
 }));
@@ -3522,7 +3541,9 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
     username: req.user.username,
     displayName: req.user.displayName,
     role: req.user.role,
+    projectKey: req.user.projectKey,
     permissions: req.user.permissions,
+    projectPermissions: req.user.projectPermissions || {},
     session: req.session
   });
 });
@@ -8654,6 +8675,8 @@ app.get("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHan
       role,
       can_balance_check,
       can_view_balance,
+      permission_overrides,
+      project_permissions,
       is_active,
       created_at,
       updated_at
@@ -8673,11 +8696,13 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     canBalanceCheck = false,
     canViewBalance = false,
     permissionOverrides = {},
+    projectPermissions = {},
     isActive = true
   } = req.body;
   const normalizedUsername = String(username || "").trim();
   const normalizedRole = String(role || "").trim();
   const normalizedPermissionOverrides = normalizePermissionOverrides(permissionOverrides);
+  const normalizedProjectPermissions = normalizeProjectPermissions(projectPermissions);
 
   if (!normalizedUsername || !password || !normalizedRole) {
     return sendApiError(res, req, 400, "username, password and role are required", "VALIDATION_ERROR");
@@ -8703,6 +8728,7 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     can_balance_check: Boolean(canBalanceCheck),
     can_view_balance: Boolean(canViewBalance),
     permission_overrides: normalizedPermissionOverrides,
+    project_permissions: normalizedProjectPermissions,
     is_active: Boolean(isActive),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -8719,9 +8745,11 @@ app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers")
     canBalanceCheck = false,
     canViewBalance = false,
     permissionOverrides = {},
+    projectPermissions = {},
     isActive = true
   } = req.body;
   const normalizedPermissionOverrides = normalizePermissionOverrides(permissionOverrides);
+  const normalizedProjectPermissions = normalizeProjectPermissions(projectPermissions);
 
   if (!["admin", "operator", "customer"].includes(role)) {
     return sendApiError(res, req, 400, "Unsupported role", "UNSUPPORTED_ROLE");
@@ -8745,6 +8773,7 @@ app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers")
         can_balance_check: Boolean(canBalanceCheck),
         can_view_balance: Boolean(canViewBalance),
         permission_overrides: normalizedPermissionOverrides,
+        project_permissions: normalizedProjectPermissions,
         is_active: Boolean(isActive),
         updated_at: new Date().toISOString()
       }

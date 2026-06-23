@@ -226,6 +226,7 @@ async function query(text, params = []) {
       can_balance_check: user.can_balance_check,
       can_view_balance: user.can_view_balance,
       permission_overrides: user.permission_overrides || {},
+      project_permissions: user.project_permissions || {},
       is_active: user.is_active
     }]);
   }

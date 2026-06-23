@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 
 const roles = ['admin', 'operator', 'customer']
+const projects = [
+  ['jokerpayment', 'Joker Payment'],
+  ['balanceChecker', 'Balance Checker'],
+  ['loginpanelchecker', 'Login Panel Checker'],
+]
 
 const roleDefaultPermissions = {
   admin: {
@@ -91,6 +96,10 @@ function defaultPermissionsForRole(role) {
   return { ...(roleDefaultPermissions[role] || roleDefaultPermissions.operator) }
 }
 
+function defaultProjectPermissionsForRole(role) {
+  return Object.fromEntries(projects.map(([key]) => [key, defaultPermissionsForRole(role)]))
+}
+
 const rolePermissions = {
   admin: [
     'Kullanıcı ve rol yönetimi',
@@ -119,6 +128,7 @@ const emptyUser = {
   canBalanceCheck: false,
   canViewBalance: false,
   permissionOverrides: defaultPermissionsForRole('operator'),
+  projectPermissions: defaultProjectPermissionsForRole('operator'),
   isActive: true,
 }
 
@@ -128,12 +138,20 @@ function toFormUser(user) {
     ...defaultPermissionsForRole(role),
     ...(user.permission_overrides || {}),
   }
+  const projectPermissions = Object.fromEntries(projects.map(([projectKey]) => [
+    projectKey,
+    {
+      ...permissionOverrides,
+      ...(user.project_permissions?.[projectKey] || {}),
+    },
+  ]))
   return {
     displayName: user.display_name || '',
     role,
     canBalanceCheck: Boolean(user.can_balance_check),
     canViewBalance: Boolean(user.can_view_balance),
     permissionOverrides,
+    projectPermissions,
     isActive: user.is_active !== false,
   }
 }
@@ -155,6 +173,23 @@ function PermissionMatrix({ value, disabled = false, onChange }) {
               {label}
             </label>
           ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ProjectPermissionMatrix({ value, disabled = false, onChange }) {
+  return (
+    <div className="project-permission-grid">
+      {projects.map(([projectKey, label]) => (
+        <div className="project-permission-card" key={projectKey}>
+          <strong>{label}</strong>
+          <PermissionMatrix
+            value={value?.[projectKey] || {}}
+            disabled={disabled}
+            onChange={(permissions) => onChange({ ...value, [projectKey]: permissions })}
+          />
         </div>
       ))}
     </div>
@@ -183,7 +218,12 @@ function UserRow({ user, currentUserId, onSave, onPassword }) {
           disabled={isSelf}
           onChange={(event) => {
             const role = event.target.value
-            setForm({ ...form, role, permissionOverrides: defaultPermissionsForRole(role) })
+            setForm({
+              ...form,
+              role,
+              permissionOverrides: defaultPermissionsForRole(role),
+              projectPermissions: defaultProjectPermissionsForRole(role),
+            })
           }}
         >
           {roles.map((role) => <option key={role} value={role}>{role}</option>)}
@@ -199,6 +239,12 @@ function UserRow({ user, currentUserId, onSave, onPassword }) {
             canBalanceCheck: permissionOverrides.canRunBalanceCheck,
             canViewBalance: permissionOverrides.canViewBalance,
           })}
+        />
+        <span className="field-label block">Proje bazlı yetkiler</span>
+        <ProjectPermissionMatrix
+          value={form.projectPermissions}
+          disabled={form.role === 'admin'}
+          onChange={(projectPermissions) => setForm({ ...form, projectPermissions })}
         />
       </td>
       <td>
@@ -316,6 +362,7 @@ export function UserManagementPage({ user, runAction }) {
                   ...form,
                   role,
                   permissionOverrides: defaultPermissionsForRole(role),
+                  projectPermissions: defaultProjectPermissionsForRole(role),
                   canBalanceCheck: roleDefaultPermissions[role]?.canRunBalanceCheck || false,
                   canViewBalance: roleDefaultPermissions[role]?.canViewBalance || false,
                 })
@@ -335,6 +382,12 @@ export function UserManagementPage({ user, runAction }) {
                 canBalanceCheck: permissionOverrides.canRunBalanceCheck,
                 canViewBalance: permissionOverrides.canViewBalance,
               })}
+            />
+            <span className="field-label block">Proje bazlı yetkiler</span>
+            <ProjectPermissionMatrix
+              value={form.projectPermissions}
+              disabled={form.role === 'admin'}
+              onChange={(projectPermissions) => setForm({ ...form, projectPermissions })}
             />
           </div>
           <label className="inline-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} /> Aktif kullanıcı</label>

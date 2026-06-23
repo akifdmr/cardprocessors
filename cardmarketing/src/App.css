@@ -315,6 +315,23 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
   min-height: 24px;
   white-space: normal;
 }
+.project-permission-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+.project-permission-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(152, 176, 164, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.018);
+}
+.project-permission-card > strong {
+  color: #f3fff8;
+  font-size: 12px;
+}
 .role-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -346,7 +363,7 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
   vertical-align: top;
 }
 .user-management-table td:nth-child(4) {
-  min-width: 520px;
+  min-width: 620px;
   white-space: normal;
 }
 .user-management-table input,

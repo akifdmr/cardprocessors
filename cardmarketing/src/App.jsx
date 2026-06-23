@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from './api/client'
+import { api, getActiveProjectKey, setActiveProjectKey } from './api/client'
 import './App.css'
 import { ActionLoader } from './components/common/ActionLoader'
 import { AppShell } from './components/layout/AppShell'
@@ -17,6 +17,7 @@ import { OllamaChatPage } from './features/ollamaChat/OllamaChatPage'
 
 export default function App() {
   const [route, setRoute] = useState('checkers')
+  const [projectKey, setProjectKeyState] = useState(getActiveProjectKey())
   const [user, setUser] = useState(null)
   const [login, setLogin] = useState({ username: 'admin', password: '' })
   const [loginError, setLoginError] = useState('')
@@ -86,6 +87,19 @@ export default function App() {
     }, { label: 'Oturum açılıyor', variant: 'login', detail: 'Kullanıcı ve panel verileri yükleniyor' })
   }
 
+  async function changeProject(nextProjectKey) {
+    setActiveProjectKey(nextProjectKey)
+    setProjectKeyState(nextProjectKey)
+    await run(async () => {
+      const me = await api('/auth/me')
+      setUser(me)
+      await loadBaseData()
+      if (route === 'user-management' && !me.permissions?.canManageUsers) {
+        setRoute('checkers')
+      }
+    }, { label: 'Proje değiştiriliyor', variant: 'logs', detail: 'Aktif yetkiler yeniden yükleniyor' })
+  }
+
   async function logout() {
     await run(async () => {
       await api('/auth/logout', { method: 'POST' })
@@ -111,7 +125,7 @@ export default function App() {
 
   return (
     <>
-      <AppShell user={user} route={route} setRoute={setRoute} onLogout={logout}>
+      <AppShell user={user} route={route} setRoute={setRoute} projectKey={projectKey} onProjectChange={changeProject} onLogout={logout}>
         {route === 'checkers' && <CheckersPage cards={cards} onRefreshCards={refreshCards} runAction={run} />}
         {route === 'unchecked-cards' && <UncheckedCardsPage user={user} runAction={run} />}
         {route === 'payment-processors' && (

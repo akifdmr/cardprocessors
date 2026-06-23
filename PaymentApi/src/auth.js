@@ -4,6 +4,8 @@ const env = require("./config/env");
 
 const SESSION_TTL_DAYS = 7;
 const SESSION_COOKIE_NAME = "clover_panel_session";
+const PROJECT_KEYS = ["jokerpayment", "balanceChecker", "loginpanelchecker"];
+const DEFAULT_PROJECT_KEY = "jokerpayment";
 const ROLE_PERMISSIONS = {
   admin: {
     canManageUsers: true,
@@ -53,6 +55,32 @@ const ROLE_PERMISSIONS = {
 };
 const USER_PERMISSION_KEYS = Object.keys(ROLE_PERMISSIONS.admin);
 
+function normalizeProjectKey(value) {
+  const raw = String(value || "").trim();
+  const aliases = {
+    balancechecker: "balanceChecker",
+    balance_checker: "balanceChecker",
+    balance: "balanceChecker",
+    loginpanelchecker: "loginpanelchecker",
+    login_panel_checker: "loginpanelchecker",
+    loginpanel: "loginpanelchecker",
+    joker: "jokerpayment",
+    jokerpayment: "jokerpayment",
+    payment: "jokerpayment"
+  };
+  return aliases[raw] || aliases[raw.toLowerCase()] || (PROJECT_KEYS.includes(raw) ? raw : DEFAULT_PROJECT_KEY);
+}
+
+function getRequestProjectKey(req) {
+  return normalizeProjectKey(
+    req?.headers?.["x-project-key"] ||
+    req?.headers?.["x-app-project"] ||
+    req?.query?.project ||
+    req?.body?.projectKey ||
+    req?.body?.project
+  );
+}
+
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const derived = crypto.scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${derived}`;
@@ -80,7 +108,7 @@ function hashSessionToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-function getEffectivePermissions(user) {
+function getEffectivePermissions(user, projectKey = DEFAULT_PROJECT_KEY) {
   const base = ROLE_PERMISSIONS[user.role] || {};
   if (user.role === "admin") {
     return { ...base };
@@ -108,6 +136,19 @@ function getEffectivePermissions(user) {
   for (const key of USER_PERMISSION_KEYS) {
     if (typeof overrides[key] === "boolean") {
       permissions[key] = overrides[key];
+    }
+  }
+
+  const normalizedProjectKey = normalizeProjectKey(projectKey);
+  const projectPermissions = user.project_permissions && typeof user.project_permissions === "object"
+    ? user.project_permissions
+    : {};
+  const projectOverrides = projectPermissions[normalizedProjectKey] && typeof projectPermissions[normalizedProjectKey] === "object"
+    ? projectPermissions[normalizedProjectKey]
+    : {};
+  for (const key of USER_PERMISSION_KEYS) {
+    if (typeof projectOverrides[key] === "boolean") {
+      permissions[key] = projectOverrides[key];
     }
   }
 
@@ -220,6 +261,8 @@ async function findSession(token) {
       u.role,
       u.can_balance_check,
       u.can_view_balance,
+      u.permission_overrides,
+      u.project_permissions,
       u.is_active
     from user_sessions s
     join users u on u.id = s.user_id
@@ -278,6 +321,7 @@ function extractCookieToken(headerValue) {
 }
 
 async function requireAuth(req, res, next) {
+  const projectKey = getRequestProjectKey(req);
   const authorization = req.headers.authorization;
   const basicCredentials = extractBasicCredentials(authorization);
   if (basicCredentials) {
@@ -292,7 +336,9 @@ async function requireAuth(req, res, next) {
       username: user.username,
       displayName: user.display_name,
       role: user.role,
-      permissions: getEffectivePermissions(user)
+      projectKey,
+      permissions: getEffectivePermissions(user, projectKey),
+      projectPermissions: user.project_permissions || {}
     };
     req.session = {
       id: null,
@@ -318,7 +364,9 @@ async function requireAuth(req, res, next) {
     username: session.username,
     displayName: session.display_name,
     role: session.role,
-    permissions: getEffectivePermissions(session)
+    projectKey,
+    permissions: getEffectivePermissions(session, projectKey),
+    projectPermissions: session.project_permissions || {}
   };
   req.session = {
     id: session.session_id,
@@ -338,6 +386,8 @@ function requirePermission(permission) {
 }
 
 module.exports = {
+  DEFAULT_PROJECT_KEY,
+  PROJECT_KEYS,
   ROLE_PERMISSIONS,
   USER_PERMISSION_KEYS,
   SESSION_COOKIE_NAME,
@@ -345,7 +395,9 @@ module.exports = {
   createSession,
   ensureBootstrapAdmin,
   getEffectivePermissions,
+  getRequestProjectKey,
   hashPassword,
+  normalizeProjectKey,
   requireAuth,
   requirePermission
 };

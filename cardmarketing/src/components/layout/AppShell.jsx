@@ -10,7 +10,13 @@ const routes = [
   ['ollama-chat', 'AI Chat'],
 ]
 
-export function AppShell({ user, route, setRoute, onLogout, children }) {
+const projectOptions = [
+  ['jokerpayment', 'Joker Payment'],
+  ['balanceChecker', 'Balance Checker'],
+  ['loginpanelchecker', 'Login Panel Checker'],
+]
+
+export function AppShell({ user, route, setRoute, projectKey, onProjectChange, onLogout, children }) {
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -21,6 +27,9 @@ export function AppShell({ user, route, setRoute, onLogout, children }) {
         <div className="identity">
           <span>{user.displayName || user.username}</span>
           <strong>{user.role}</strong>
+          <select value={projectKey || user.projectKey || 'jokerpayment'} onChange={(event) => onProjectChange(event.target.value)}>
+            {projectOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
           <button className="ghost small" type="button" onClick={onLogout}>Logout</button>
         </div>
       </header>
