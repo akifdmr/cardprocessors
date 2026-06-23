@@ -349,20 +349,30 @@ async function checkCard(payload = {}) {
       isLive: false
     };
   }
+  const livePassed = liveCheckerService.isLiveResponse(live);
   let binCheck;
-  try {
-    binCheck = await binCheckCard(payload);
-  } catch (error) {
+  if (payload.binCheckOnlyIfLive && !livePassed) {
     binCheck = {
-      status: "review",
-      error: error.message,
-      fallbackError: error.message,
-      source: "unavailable",
-      bin: digitsOnly(payload.pan || payload.cardNumber || payload.bin).slice(0, 6)
+      status: "skipped",
+      source: "live_check_gate",
+      bin: digitsOnly(payload.pan || payload.cardNumber || payload.bin).slice(0, 6),
+      providerWarning: "BIN check skipped because live check did not pass"
     };
+  } else {
+    try {
+      binCheck = await binCheckCard(payload);
+    } catch (error) {
+      binCheck = {
+        status: "review",
+        error: error.message,
+        fallbackError: error.message,
+        source: "unavailable",
+        bin: digitsOnly(payload.pan || payload.cardNumber || payload.bin).slice(0, 6)
+      };
+    }
   }
   return {
-    status: liveCheckerService.isLiveResponse(live) ? "passed" : "review",
+    status: livePassed ? "passed" : "review",
     live,
     binCheck,
     compact: liveCheckerService.toCompactLiveCheckerResponse({

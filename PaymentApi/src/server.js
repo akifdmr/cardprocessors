@@ -5730,7 +5730,8 @@ function uncheckedCardCheckPayload(card = {}, body = {}) {
     phone: card.phone || "",
     amount: Number(body.amount || 1),
     currency: body.currency || "usd",
-    liveMode: body.liveMode || "verification"
+    liveMode: body.liveMode || "verification",
+    binCheckOnlyIfLive: body.binCheckOnlyIfLive !== false
   };
 }
 
