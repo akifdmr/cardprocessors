@@ -10,6 +10,7 @@ import { PerfectGeneratorPanel } from './PerfectGeneratorPage'
 const tabs = [
   ['ip', 'IP Lookup'],
   ['bin', 'Card BIN Check'],
+  ['joker', 'Joker Checker'],
   ['live', 'Card Live Check'],
   ['balance', 'Balance Check'],
   ['learning', 'Machine Learning / Card Üretim'],
@@ -439,6 +440,14 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     }
   }
 
+  async function runJoker() {
+    const normalizedBin = normalizeBin(form.bin || form.first6 || form.pan)
+    if (normalizedBin.length !== 6) {
+      throw new Error('Joker Checker için 6 haneli BIN/IIN gerekli.')
+    }
+    return loggedApi('/checkers/joker', { bin: normalizedBin }, 'Joker BIN Check')
+  }
+
   async function runLiveWithBin(payload, provider, operation = 'live') {
     const liveResp = await loggedApi('/checkers/livecheck', { ...payload, provider, operation, runBinCheck: true }, 'Live Check')
 
@@ -617,6 +626,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     const loaderByTab = {
       ip: { label: 'IP/BIN istihbaratı çalışıyor', variant: 'auth', detail: 'BIN ve IP detayları sorgulanıyor' },
       bin: { label: 'Card BIN check çalışıyor', variant: 'auth', detail: 'Kart BIN bilgileri doğrulanıyor' },
+      joker: { label: 'Joker Checker çalışıyor', variant: 'auth', detail: 'BIN metadata Joker /bincheck üzerinden sorgulanıyor' },
       live: { label: 'Live checker çalışıyor', variant: 'auth', detail: 'Tek request içinde provider verify ve BIN sorgusu çalışıyor' },
       balance: { label: 'Balance check çalışıyor', variant: 'transaction', detail: 'Seçili kart için balance sorgusu gönderiliyor' },
       learning: { label: 'Card üretim modeli çalışıyor', variant: 'sequence', detail: 'Clover learning run başlatılıyor' },
@@ -624,8 +634,8 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
     try {
       await withLoader(async () => {
         setResult(null)
-        if (tab === 'ip' || tab === 'bin') {
-          setResult({ type: 'bin', data: await runBin() })
+        if (tab === 'ip' || tab === 'bin' || tab === 'joker') {
+          setResult({ type: 'bin', data: tab === 'joker' ? await runJoker() : await runBin() })
           return
         }
         if (tab === 'live') {
@@ -758,7 +768,7 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
               <label><span>IP</span><input value={form.ip || ''} onChange={(event) => setForm({ ...form, ip: event.target.value })} /></label>
             </>
           ) : null}
-          {tab === 'bin' ? <CardInput value={form} onChange={setForm} cards={cards} binOnly /> : null}
+          {tab === 'bin' || tab === 'joker' ? <CardInput value={form} onChange={setForm} cards={cards} binOnly /> : null}
           {tab === 'live' ? (
             <>
               <label>
@@ -844,22 +854,21 @@ export function CheckersPage({ cards, onRefreshCards, runAction }) {
           ) : null}
           {tab === 'balance' ? (
             <>
-              <label className="full">
-                <span>Charge Permission ID</span>
-                <input value={form.chargePermissionId || ''} onChange={(event) => setForm({ ...form, provider: 'amazonpay', chargePermissionId: event.target.value })} />
-              </label>
-              <label>
-                <span>Amount</span>
-                <input value={form.amount || '0.20'} inputMode="decimal" onChange={(event) => setForm({ ...form, provider: 'amazonpay', amount: formatMoneyInput(event.target.value) })} />
-              </label>
-              <label>
-                <span>Currency</span>
-                <input value={form.currency || 'USD'} onChange={(event) => setForm({ ...form, provider: 'amazonpay', currency: event.target.value.toUpperCase().slice(0, 3) })} />
-              </label>
-              <label className="full">
-                <span>Reference / Order</span>
-                <input value={form.reference || ''} onChange={(event) => setForm({ ...form, provider: 'amazonpay', reference: event.target.value })} />
-              </label>
+               <div className="full">
+      <CardInput value={form} onChange={setForm} cards={cards} />
+    </div>
+    <label>
+      <span>Amount</span>
+      <input value={form.amount || '0.20'} inputMode="decimal" onChange={(event) => setForm({ ...form, amount: formatMoneyInput(event.target.value) })} />
+    </label>
+    <label>
+      <span>Currency</span>
+      <input value={form.currency || 'USD'} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase().slice(0, 3) })} />
+    </label>
+    <label className="full">
+      <span>Reference / Order</span>
+      <input value={form.reference || ''} onChange={(event) => setForm({ ...form, reference: event.target.value })} />
+    </label>
             </>
           ) : null}
             <button className="primary full" type="submit" disabled={submitting}>

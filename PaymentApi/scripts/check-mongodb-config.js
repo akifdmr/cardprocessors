@@ -5,7 +5,11 @@ const rootDir = path.resolve(__dirname, "..");
 const nodeEnv = process.env.NODE_ENV || "development";
 
 dotenv.config({ path: path.join(rootDir, ".env") });
-dotenv.config({ path: path.join(rootDir, `.env.${nodeEnv}`), override: true });
+
+const shouldLoadEnvSpecificDotenv = nodeEnv !== "production" || process.env.LOAD_DOTENV === "true";
+if (shouldLoadEnvSpecificDotenv) {
+  dotenv.config({ path: path.join(rootDir, `.env.${nodeEnv}`), override: true });
+}
 
 const env = require("../src/config/env");
 

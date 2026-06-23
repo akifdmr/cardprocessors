@@ -19,6 +19,7 @@ const amazonPayService = require("./services/amazonPayService");
 const globalPaymentsService = require("./services/globalPaymentsService");
 const propelrPayService = require("./services/propelrPayService");
 const quikliePaymentService = require("./services/quikliePaymentService");
+const jokerCheckerService = require("./services/jokerCheckerService");
 const paypalService = require("./services/paypalService");
 const providerRouter = require("./services/providerRouter");
 const twilioVoiceService = require("./services/twilioVoiceService");
@@ -757,6 +758,31 @@ const openApiDocument = {
           }
         },
         responses: { 200: { description: "PayPal BIN check result" } }
+      }
+    },
+    "/api/checkers/joker": {
+      post: {
+        summary: "Run a BIN-only lookup through Joker Checker",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  bin: { type: "string", pattern: "^\\d{6}$" },
+                  cards: {
+                    type: "array",
+                    maxItems: 100,
+                    items: { type: "string", pattern: "^\\d{6}$" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        responses: { 200: { description: "Normalized Joker BIN lookup result" } }
       }
     },
     "/api/providers/paypal/manager/cards/auth": {
@@ -1876,6 +1902,18 @@ function getProviderReportCatalog() {
       capabilities: ["bin_check", "bin_ip_check"]
     },
     {
+      key: "joker_checker",
+      group: "card_intelligence",
+      label: "Joker Checker",
+      configured: Boolean(env.providers.jokerChecker.baseUrl),
+      missing: env.providers.jokerChecker.baseUrl ? [] : ["JOKER_CHECKER_API_BASE_URL"],
+      configNotes: [
+        `Base URL: ${env.providers.jokerChecker.baseUrl || "-"}`,
+        "Only /bincheck is integrated; full-card, live and balance probing endpoints are intentionally disabled"
+      ],
+      capabilities: ["bin_check"]
+    },
+    {
       key: "twilio_voice",
       group: "voice_verification",
       label: "Twilio Voice",
@@ -2523,6 +2561,7 @@ function classifyAttemptProvider(attempt) {
 function classifyAuditProvider(log) {
   const action = String(log.action || "");
   const entityId = String(log.entity_id || "");
+  if (action.startsWith("joker_checker_") || entityId.startsWith("joker-")) return "joker_checker";
   if (action.includes("bin_check")) return "rapidapi_bin_checker";
   if (action.startsWith("clover_") || entityId.startsWith("clover")) return "clover";
   if (action.startsWith("fluidpay_") || entityId.startsWith("fluidpay")) return "fluidpay";
@@ -3161,6 +3200,8 @@ app.get("/health", asyncHandler(async (_req, res) => {
   const mongo = await getMongoStatus();
   res.status(mongo.ok ? 200 : 503).json({
     ok: mongo.ok,
+    service: "cardmarket-payment-api",
+    environment: env.nodeEnv,
     services: { mongo }
   });
 }));
@@ -7340,6 +7381,31 @@ app.post(["/api/checkers/bincheck", "/api/checkers/bin-check"], requireAuth, req
   res.json({
     ...result,
     endpoint: "bincheck"
+  });
+}));
+
+app.post(["/api/checkers/joker", "/api/checkers/joker-check"], requireAuth, requirePermission("canRunBinCheck"), asyncHandler(async (req, res) => {
+  const cards = Array.isArray(req.body?.cards) ? req.body.cards : null;
+  const result = cards
+    ? await jokerCheckerService.checkBins(cards)
+    : await jokerCheckerService.checkBin(req.body?.bin);
+
+  await writeAuditLog({
+    entityType: "checker",
+    entityId: cards ? `joker-batch-${result.total}` : result.bin,
+    action: "joker_checker_bincheck",
+    status: result.status,
+    actorUserId: req.user.id,
+    details: {
+      source: "joker_checker",
+      bins: cards ? result.results.map((item) => item.bin) : [result.bin],
+      result
+    }
+  });
+
+  res.json({
+    ...result,
+    endpoint: "joker"
   });
 }));
 

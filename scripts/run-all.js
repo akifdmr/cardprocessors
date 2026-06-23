@@ -17,7 +17,9 @@ const SERVICE = readOption("service", "all");
 const APP_ENV = readOption("env", process.env.APP_ENV || process.env.NODE_ENV || "development");
 const API_PORT = Number(readOption("api-port", process.env.API_PORT || process.env.PORT || "3103"));
 const REACT_PORT = Number(readOption("react-port", process.env.REACT_PORT || process.env.VITE_PORT || "5173"));
-const REQUIRE_REMOTE_MONGO = process.env.REQUIRE_REMOTE_MONGO !== "false";
+let requireRemoteMongo = process.env.REQUIRE_REMOTE_MONGO
+  ? process.env.REQUIRE_REMOTE_MONGO !== "false"
+  : APP_ENV === "production";
 const API_HEALTH_URL = (port) => `http://127.0.0.1:${port}/health`;
 const isDev = COMMAND === "dev";
 const isRun = COMMAND === "run";
@@ -38,6 +40,7 @@ const baseEnv = {
   MONGODB_USE_REMOTE: process.env.MONGODB_USE_REMOTE || "true",
   MONGODB_USE_ATLAS: process.env.MONGODB_USE_ATLAS || "true"
 };
+let activeEnv = baseEnv;
 
 const processes = [];
 let shuttingDown = false;
@@ -110,8 +113,8 @@ function requestJson(url) {
 
 function usesRequiredMongo(health) {
   if (!health.ok) return false;
-  if (!REQUIRE_REMOTE_MONGO) return true;
-  return health.data?.services?.mongo?.authMode !== "local";
+  if (!requireRemoteMongo) return true;
+  return health.data?.services?.mongo?.source !== "local";
 }
 
 async function waitForHealth(url, timeoutMs = 60000) {
@@ -141,10 +144,38 @@ async function findApiPort() {
 async function ensureApi(apiPort, existingHealth) {
   const apiHealthUrl = API_HEALTH_URL(apiPort);
 
+  if (APP_ENV === "production") {
+    console.log(`[${COMMAND}] Validating production environment...`);
+    await runProcess("deploy validation", "npm", ["--prefix", "PaymentApi", "run", "deploy:validate"], {
+      env: baseEnv
+    });
+  }
+
   console.log(`[${COMMAND}] Running MongoDB migration for ${APP_ENV}...`);
-  await runProcess("migration", "npm", ["--prefix", "PaymentApi", "run", "db:migrate"], {
-    env: baseEnv
-  });
+  try {
+    await runProcess("migration", "npm", ["--prefix", "PaymentApi", "run", "db:migrate"], {
+      env: activeEnv
+    });
+  } catch (error) {
+    if (APP_ENV === "production" || process.env.REQUIRE_REMOTE_MONGO === "true") {
+      throw error;
+    }
+
+    console.warn(`[${COMMAND}] Remote MongoDB migration failed: ${error.message}`);
+    console.warn(`[${COMMAND}] Falling back to local MongoDB for ${APP_ENV}. Set REQUIRE_REMOTE_MONGO=true to make remote MongoDB mandatory.`);
+    activeEnv = {
+      ...baseEnv,
+      MONGODB_USE_REMOTE: "false",
+      MONGODB_USE_ATLAS: "false",
+      DATABASE_URL: process.env.LOCAL_DATABASE_URL || "mongodb://127.0.0.1:27017/cardmarket",
+      MONGODB_DATABASE: process.env.LOCAL_MONGODB_DATABASE || process.env.MONGODB_DATABASE || "cardmarket"
+    };
+    requireRemoteMongo = false;
+
+    await runProcess("local migration", "npm", ["--prefix", "PaymentApi", "run", "db:migrate"], {
+      env: activeEnv
+    });
+  }
 
   if (usesRequiredMongo(existingHealth)) {
     console.log(`[${COMMAND}] PaymentApi is already healthy at ${apiHealthUrl}. Reusing it.`);
@@ -154,7 +185,7 @@ async function ensureApi(apiPort, existingHealth) {
   console.log(`[${COMMAND}] Starting PaymentApi on port ${apiPort} with NODE_ENV=${APP_ENV}...`);
   startProcess("api", "npm", ["--prefix", "PaymentApi", "run", "start"], {
     env: {
-      ...baseEnv,
+      ...activeEnv,
       PORT: String(apiPort)
     }
   });

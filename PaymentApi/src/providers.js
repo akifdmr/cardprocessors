@@ -144,6 +144,12 @@ function getPublicProviderConfig() {
       operationPathsConfigured: Object.fromEntries(
         Object.entries(env.providers.quiklie.paths || {}).map(([key, value]) => [key, Boolean(value)])
       )
+    },
+    jokerChecker: {
+      baseUrl: env.providers.jokerChecker.baseUrl,
+      configured: Boolean(env.providers.jokerChecker.baseUrl),
+      capabilities: ["bin_check"],
+      disabledCapabilities: ["full_card_check", "live_check", "balance_check", "bulk_card_file"]
     }
   };
 }

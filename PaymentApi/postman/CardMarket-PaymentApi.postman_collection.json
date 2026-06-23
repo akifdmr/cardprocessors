@@ -2,14 +2,22 @@
   "info": {
     "_postman_id": "cc56b990-1719-4e58-bd72-cardmarket-api",
     "name": "CardMarket PaymentApi",
-    "description": "CardMarket API requests using application username/password credentials through HTTP Basic authentication. No API token or login request is required.",
+    "description": "CardMarket PaymentApi ana API koleksiyonu. Varsayilan auth HTTP Basic ile admin kullanicisidir; Login endpointi UI oturum akisini test etmek icindir.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "basic",
     "basic": [
-      { "key": "username", "value": "{{username}}", "type": "string" },
-      { "key": "password", "value": "{{password}}", "type": "string" }
+      {
+        "key": "username",
+        "value": "{{username}}",
+        "type": "string"
+      },
+      {
+        "key": "password",
+        "value": "{{password}}",
+        "type": "string"
+      }
     ]
   },
   "event": [
@@ -24,42 +32,155 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3103" },
-    { "key": "username", "value": "admin" },
-    { "key": "password", "value": "" },
-    { "key": "cardId", "value": "" },
-    { "key": "transactionId", "value": "" },
-    { "key": "provider", "value": "clover" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3103"
+    },
+    {
+      "key": "renderUrl",
+      "value": "https://cardprocessors.onrender.com"
+    },
+    {
+      "key": "username",
+      "value": "admin"
+    },
+    {
+      "key": "password",
+      "value": ""
+    },
+    {
+      "key": "provider",
+      "value": "clover"
+    },
+    {
+      "key": "cardId",
+      "value": ""
+    },
+    {
+      "key": "uncheckedCardId",
+      "value": ""
+    },
+    {
+      "key": "checkedCardId",
+      "value": ""
+    },
+    {
+      "key": "checkedLiveCardId",
+      "value": ""
+    },
+    {
+      "key": "transactionId",
+      "value": ""
+    },
+    {
+      "key": "paymentId",
+      "value": ""
+    },
+    {
+      "key": "accountId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "chargePermissionId",
+      "value": ""
+    },
+    {
+      "key": "checkoutSessionId",
+      "value": ""
+    },
+    {
+      "key": "paymentMethodNonce",
+      "value": ""
+    },
+    {
+      "key": "bin",
+      "value": "411111"
+    },
+    {
+      "key": "numberId",
+      "value": ""
+    },
+    {
+      "key": "pendingId",
+      "value": ""
+    },
+    {
+      "key": "caseId",
+      "value": ""
+    }
   ],
   "item": [
     {
-      "name": "System",
+      "name": "Deploy / Meta",
       "item": [
         {
-          "name": "Health",
-          "auth": { "type": "noauth" },
+          "name": "Local Health",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/health"
+          },
+          "auth": {
+            "type": "noauth"
+          }
+        },
+        {
+          "name": "Render Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{renderUrl}}/health"
+          },
+          "auth": {
+            "type": "noauth"
+          }
+        },
+        {
+          "name": "React App",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/react/"
+          },
+          "auth": {
+            "type": "noauth"
           }
         },
         {
           "name": "OpenAPI JSON",
-          "auth": { "type": "noauth" },
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/openapi.json"
+          },
+          "auth": {
+            "type": "noauth"
           }
         },
         {
           "name": "Download Postman Collection",
-          "auth": { "type": "noauth" },
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/meta/postman/collection"
+          },
+          "auth": {
+            "type": "noauth"
+          }
+        },
+        {
+          "name": "Download Postman Environment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/meta/postman/environment"
+          },
+          "auth": {
+            "type": "noauth"
           }
         }
       ]
@@ -69,30 +190,22 @@
       "item": [
         {
           "name": "Login",
-          "auth": { "type": "noauth" },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "pm.expect(body.user).to.be.an('object');"
-                ]
-              }
-            }
-          ],
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
-            },
-            "url": "{{baseUrl}}/api/auth/login"
+            }
+          },
+          "auth": {
+            "type": "noauth"
           }
         },
         {
@@ -114,28 +227,165 @@
       ]
     },
     {
+      "name": "System",
+      "item": [
+        {
+          "name": "MongoDB Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/system/mongodb/status"
+          }
+        },
+        {
+          "name": "System Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/system/health"
+          }
+        },
+        {
+          "name": "Run System Health Check",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/system/health/check"
+          }
+        },
+        {
+          "name": "Provider Status Table",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/status-table"
+          }
+        },
+        {
+          "name": "Provider Router Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/provider-router/status"
+          }
+        },
+        {
+          "name": "Configured Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/config/providers"
+          }
+        }
+      ]
+    },
+    {
       "name": "Cards",
       "item": [
         {
           "name": "List Cards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cards"
+          },
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  const rows = pm.response.json();",
-                  "  if (Array.isArray(rows) && rows[0]?.id) pm.collectionVariables.set('cardId', rows[0].id);",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = Array.isArray(body) ? body[0]?.id : body.cards?.[0]?.id;",
+                  "  if (value) pm.collectionVariables.set('cardId', value);",
                   "}"
                 ]
               }
             }
-          ],
+          ]
+        },
+        {
+          "name": "Create Card Placeholder",
           "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/api/cards"
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cards",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardholderName\": \"Sandbox User\",\n  \"last4\": \"1111\",\n  \"brand\": \"visa\",\n  \"expMonth\": \"12\",\n  \"expYear\": \"2030\",\n  \"billingZip\": \"00000\",\n  \"provider\": \"{{provider}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.id || body.card?.id;",
+                  "  if (value) pm.collectionVariables.set('cardId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Validate Card Input",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cards/validate-input",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4111111111111111\",\n  \"expMonth\": \"12\",\n  \"expYear\": \"2030\",\n  \"cardholderName\": \"Sandbox User\",\n  \"billingZip\": \"00000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Provider Verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cards/{{cardId}}/provider-verification",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create Card Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cards/{{cardId}}/checks",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"status\": \"pending\",\n  \"attemptType\": \"manual\"\n}"
+            }
           }
         },
         {
@@ -147,17 +397,326 @@
           }
         },
         {
-          "name": "Validate Card Input",
+          "name": "Card Enrollment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cards/{{cardId}}/enrollment"
+          }
+        },
+        {
+          "name": "Save Card Enrollment",
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": "{{baseUrl}}/api/cards/{{cardId}}/enrollment",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"pan\": \"4111111111111111\",\n  \"expMonth\": \"12\",\n  \"expYear\": \"2030\",\n  \"cardholderName\": \"Sandbox User\",\n  \"billingZip\": \"00000\"\n}"
-            },
-            "url": "{{baseUrl}}/api/cards/validate-input"
+              "raw": "{\n  \"status\": \"enrolled\",\n  \"provider\": \"{{provider}}\",\n  \"referenceId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unchecked / Checked Cards",
+      "item": [
+        {
+          "name": "List Unchecked Cards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/unchecked-cards"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.items?.[0]?.id || body.cards?.[0]?.id || body[0]?.id;",
+                  "  if (value) pm.collectionVariables.set('uncheckedCardId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import Unchecked Card Placeholder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchecked-cards",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"line\": \"4111111111111111|12|2030|123\",\n  \"source\": \"postman-sandbox\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.id || body.card?.id;",
+                  "  if (value) pm.collectionVariables.set('uncheckedCardId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Live Check Unchecked Card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchecked-cards/{{uncheckedCardId}}/live-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"mode\": \"verification\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Live Check Selected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchecked-cards/live-check-selected",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardIds\": [\n    \"{{uncheckedCardId}}\"\n  ],\n  \"provider\": \"{{provider}}\",\n  \"mode\": \"verification\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Check Range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchecked-cards/check-range",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": 0,\n  \"limit\": 10,\n  \"provider\": \"{{provider}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Checked Live Cards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/checked-live-cards"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.items?.[0]?.id || body.cards?.[0]?.id || body[0]?.id;",
+                  "  if (value) pm.collectionVariables.set('checkedLiveCardId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Checked Cards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/checked-cards"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.items?.[0]?.id || body.cards?.[0]?.id || body[0]?.id;",
+                  "  if (value) pm.collectionVariables.set('checkedCardId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Checked Card Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checked-cards/{{checkedCardId}}/action",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"action\": \"verify\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Checked Live Card Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checked-live-cards/{{checkedLiveCardId}}/action",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"action\": \"verify\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Checked Card Amazon Pay Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checked-cards/{{checkedCardId}}/amazonpay/action",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"auth\",\n  \"amount\": 1,\n  \"currency\": \"USD\",\n  \"chargePermissionId\": \"{{chargePermissionId}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Checkers",
+      "item": [
+        {
+          "name": "BIN Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checkers/bincheck",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bin\": \"{{bin}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Joker Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checkers/joker",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bin\": \"{{bin}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Live Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checkers/livecheck",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"mode\": \"verification\",\n  \"cardId\": \"{{cardId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Live Checker Bulk",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checkers/live-checker",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"cards\": [\n    \"4111111111111111|12|2030|123\"\n  ],\n  \"mode\": \"verification\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Balance Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/checkers/balance",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"cardId\": \"{{cardId}}\"\n}"
+            }
           }
         }
       ]
@@ -196,13 +755,31 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/payment-processors/logs?processor=&attemptType=&status=&limit=100",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "payment-processors", "logs"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payment-processors",
+                "logs"
+              ],
               "query": [
-                { "key": "processor", "value": "" },
-                { "key": "attemptType", "value": "" },
-                { "key": "status", "value": "" },
-                { "key": "limit", "value": "100" }
+                {
+                  "key": "processor",
+                  "value": ""
+                },
+                {
+                  "key": "attemptType",
+                  "value": ""
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
               ]
             }
           }
@@ -212,46 +789,2008 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": "{{baseUrl}}/api/provider-operations/cards",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"{{provider}}\",\n  \"operation\": \"transaction_detail\",\n  \"transactionId\": \"{{transactionId}}\"\n}"
-            },
-            "url": "{{baseUrl}}/api/provider-operations/cards"
+            }
+          }
+        },
+        {
+          "name": "Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/audit-logs"
+          }
+        },
+        {
+          "name": "Provider Reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/provider-reports"
           }
         }
       ]
     },
     {
-      "name": "Unified PayPal + Braintree",
+      "name": "Provider - Clover",
       "item": [
         {
-          "name": "Single Token Auth + Void",
+          "name": "Test Connection",
           "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
-            },
-            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify"
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/test"
           }
         },
         {
-          "name": "Batch Token Auth + Void",
+          "name": "Iframe Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/iframe-config"
+          }
+        },
+        {
+          "name": "Merchant",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/merchant"
+          }
+        },
+        {
+          "name": "Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/orders"
+          }
+        },
+        {
+          "name": "Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/payments"
+          }
+        },
+        {
+          "name": "Tokenize Card",
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": "{{baseUrl}}/api/providers/clover/cards/tokenize",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"cardIds\": [\"{{cardId}}\"],\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
-            },
-            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify"
+              "raw": "{\n  \"source\": \"{{paymentMethodNonce}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Preauth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/clover/preauth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"{{paymentMethodNonce}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify With BIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/clover/cards/verify-with-bin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"{{paymentMethodNonce}}\",\n  \"bin\": \"{{bin}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Iframe Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/clover/cards/iframe-verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{paymentMethodNonce}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/clover/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentId\": \"{{paymentId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Tenders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/clover/tenders"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider - PayPal",
+      "item": [
+        {
+          "name": "REST Test",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/paypal/rest/test"
+          }
+        },
+        {
+          "name": "Manager Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/status"
+          }
+        },
+        {
+          "name": "Manager Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "NVP Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/nvp/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Sandbox Card Authorize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/sandbox/orders/card-authorize",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentSource\": {\n    \"card\": {\n      \"name\": \"Sandbox User\",\n      \"number\": \"4111111111111111\",\n      \"expiry\": \"2030-12\",\n      \"security_code\": \"123\"\n    }\n  },\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager Inquiry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/inquiry",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager Live Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/cards/live-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager BIN Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/cards/bin-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bin\": \"{{bin}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Direct Payment Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/direct-payment/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/manager/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Direct Payment Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/paypal/direct-payment/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider - Braintree / Unified",
+      "item": [
+        {
+          "name": "Client Token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/braintree/client-token"
+          }
+        },
+        {
+          "name": "Drop-in Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/braintree/dropin/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodNonce\": \"{{paymentMethodNonce}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Unified Single Token Auth + Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Unified Batch Token Auth + Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unified-processor/payment-methods/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardIds\": [\n    \"{{cardId}}\"\n  ],\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider - Generic Card Gateways",
+      "item": [
+        {
+          "name": "fluidpay Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/fluidpay/status"
+          }
+        },
+        {
+          "name": "fluidpay Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/fluidpay/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "fluidpay Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/fluidpay/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "globalpayments Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/globalpayments/status"
+          }
+        },
+        {
+          "name": "globalpayments Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/globalpayments/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "globalpayments Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/globalpayments/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "nmi Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/nmi/status"
+          }
+        },
+        {
+          "name": "nmi Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "nmi Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/nmi/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "nmi Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/nmi/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "zoho Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/zoho/status"
+          }
+        },
+        {
+          "name": "zoho Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "zoho Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/zoho/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "zoho Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/zoho/transactions/{{transactionId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider - Amazon Pay",
+      "item": [
+        {
+          "name": "Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/amazonpay/status"
+          }
+        },
+        {
+          "name": "Legacy Widget Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/amazonpay/legacy-widget-config"
+          }
+        },
+        {
+          "name": "Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Create Checkout Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/checkout-sessions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.checkoutSessionId || body.checkoutSession?.checkoutSessionId;",
+                  "  if (value) pm.collectionVariables.set('checkoutSessionId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Complete Checkout Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/checkout-sessions/{{checkoutSessionId}}/complete",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Authorize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chargePermissionId\": \"{{chargePermissionId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chargePermissionId\": \"{{chargePermissionId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chargePermissionId\": \"{{chargePermissionId}}\",\n  \"amount\": 1,\n  \"currency\": \"USD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Capture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Void",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/cards/void",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Charge Permission Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/amazonpay/charge-permissions/{{chargePermissionId}}"
+          }
+        },
+        {
+          "name": "Update Charge Permission",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/amazonpay/charge-permissions/{{chargePermissionId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"statusDetails\": {\n    \"state\": \"Chargeable\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Close Charge Permission",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/amazonpay/charge-permissions/{{chargePermissionId}}/close"
+          }
+        },
+        {
+          "name": "Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/amazonpay/transactions/{{transactionId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider - Quiklie / PropelrPay",
+      "item": [
+        {
+          "name": "Quiklie Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/quiklie/status"
+          }
+        },
+        {
+          "name": "Quiklie Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/quiklie/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Quiklie Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/quiklie/cards/sale",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Quiklie Auth",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/quiklie/cards/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Quiklie Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/quiklie/cards/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Quiklie OTP Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/quiklie/otp/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"otp\": \"000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Quiklie Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/quiklie/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "PropelrPay Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/propelrpay/status"
+          }
+        },
+        {
+          "name": "PropelrPay Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/propelrpay/test",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "PropelrPay Amount Sequence",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/providers/propelrpay/amount-sequence",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amounts\": [\n    0.11,\n    0.12,\n    0.13\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "PropelrPay Transaction Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/propelrpay/transactions/{{transactionId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Voice / Number / Masking",
+      "item": [
+        {
+          "name": "Voice Token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/voice/token"
+          }
+        },
+        {
+          "name": "Twilio Provider Test",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/providers/twilio/test"
+          }
+        },
+        {
+          "name": "Add Number",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/numbers/add",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"phoneNumber\": \"+15555550123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify Number",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/numbers/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"+15555550123\",\n  \"code\": \"000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Start Twilio Verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/numbers/{{numberId}}/twilio/start",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"sms\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Check Twilio Verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/numbers/{{numberId}}/twilio/check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Numbers For Card",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/numbers/card/{{cardId}}"
+          }
+        },
+        {
+          "name": "All Numbers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/numbers/all"
+          }
+        },
+        {
+          "name": "Create Mask",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/masks/create",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"phoneNumber\": \"+15555550123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Resolve Mask",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/masks/resolve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"maskedNumber\": \"+15555550123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Initiate Call",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/calls/initiate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"+15555550123\",\n  \"from\": \"+15555550124\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Initiate Card Call",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/calls/card",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"to\": \"+15555550123\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Debt Management",
+      "item": [
+        {
+          "name": "Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/summary"
+          }
+        },
+        {
+          "name": "Funding Accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/funding-accounts"
+          }
+        },
+        {
+          "name": "Create Funding Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/debt-management/funding-accounts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sandbox Funding\",\n  \"type\": \"checking\",\n  \"last4\": \"0000\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.id || body.account?.id;",
+                  "  if (value) pm.collectionVariables.set('accountId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Funding Account Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/funding-accounts/{{accountId}}"
+          }
+        },
+        {
+          "name": "Funding Account Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/funding-accounts/{{accountId}}/payments"
+          }
+        },
+        {
+          "name": "Debt Cards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/cards"
+          }
+        },
+        {
+          "name": "Create Debt Card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/debt-management/cards",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"balance\": 100,\n  \"apr\": 24.99\n}"
+            }
+          }
+        },
+        {
+          "name": "Debt Card Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/cards/{{cardId}}"
+          }
+        },
+        {
+          "name": "Debt Card Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/cards/{{cardId}}/payments"
+          }
+        },
+        {
+          "name": "Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/debt-management/payments"
+          }
+        },
+        {
+          "name": "Create Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/debt-management/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"accountId\": \"{{accountId}}\",\n  \"amount\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.id || body.payment?.id;",
+                  "  if (value) pm.collectionVariables.set('paymentId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Payment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/debt-management/payments/{{paymentId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"scheduled\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/users"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.users?.[0]?.id || body[0]?.id;",
+                  "  if (value) pm.collectionVariables.set('userId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"operator\",\n  \"password\": \"ChangeMe12345!\",\n  \"displayName\": \"Operator\",\n  \"role\": \"operator\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  const value = body.id || body.user?.id;",
+                  "  if (value) pm.collectionVariables.set('userId', value);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/{{userId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Operator\",\n  \"role\": \"operator\",\n  \"active\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Set User Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/{{userId}}/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"ChangeMe12345!\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Security / Burp Suite",
+      "item": [
+        {
+          "name": "Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/security/burp-suite/status"
+          }
+        },
+        {
+          "name": "Start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/security/burp-suite/start",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUrl\": \"{{baseUrl}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Stop",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/security/burp-suite/stop"
+          }
+        },
+        {
+          "name": "Arm OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/security/burp-suite/otp/arm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"+15555550123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/security/burp-suite/otp/send",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"+15555550123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "OTP Inbox Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/security/burp-suite/otp/inbox",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"+15555550123\",\n  \"body\": \"000000\"\n}"
+            }
+          },
+          "auth": {
+            "type": "noauth"
+          }
+        },
+        {
+          "name": "OTP Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/security/burp-suite/otp/messages"
+          }
+        },
+        {
+          "name": "Traffic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/security/burp-suite/traffic"
+          }
+        },
+        {
+          "name": "Pending",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/security/burp-suite/pending"
+          }
+        },
+        {
+          "name": "Resolve Pending",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/security/burp-suite/pending/{{pendingId}}/resolve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": \"approved\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ollama / AI",
+      "item": [
+        {
+          "name": "Tags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ollama/tags"
+          }
+        },
+        {
+          "name": "Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ollama/status"
+          }
+        },
+        {
+          "name": "Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ollama/chat",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"qwen2.5:7b\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"status\"\n    }\n  ]\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unchargeback",
+      "item": [
+        {
+          "name": "List Cases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/unchargeback/cases"
+          }
+        },
+        {
+          "name": "Create Case",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchargeback/cases",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{cardId}}\",\n  \"amount\": 25,\n  \"reason\": \"sandbox\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Case Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/unchargeback/cases/{{caseId}}/evidence",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sandbox evidence placeholder\"\n}"
+            }
           }
         }
       ]

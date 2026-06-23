@@ -7,6 +7,7 @@
     "build": "node scripts/check-syntax.js",
     "build:all": "npm run build && node scripts/check-mongodb-config.js",
     "check": "npm run build",
+    "deploy:validate": "node scripts/validate-deploy-env.js",
     "db:migrate": "node scripts/migrate-mongodb.js",
     "valid:import": "node scripts/import-valid-card-lists-safe.js",
     "dev": "cross-env NODE_ENV=development MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true npm run db:migrate && cross-env NODE_ENV=development MONGODB_USE_REMOTE=true MONGODB_USE_ATLAS=true node src/server.js",

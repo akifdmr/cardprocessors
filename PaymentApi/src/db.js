@@ -54,6 +54,15 @@ function getMongoErrorSummary(error) {
   const cause = error?.cause || error?.reason || error;
   const message = String(cause?.message || error?.message || "Unknown MongoDB error");
   const isTlsInternalError = message.includes("tlsv1 alert internal error");
+  const isBadAuth = /bad auth|authentication failed/i.test(message);
+
+  if (isBadAuth) {
+    return {
+      code: "MONGODB_BAD_AUTH",
+      message: "MongoDB authentication failed. Check the Atlas Database Access username and password used by DATABASE_URL, or by MONGODB_USERNAME and MONGODB_PASSWORD when the connection string is derived from X.509.",
+      detail: "This is not an IP allowlist or DNS error; Atlas rejected the supplied database credentials."
+    };
+  }
 
   if (isTlsInternalError) {
     return {

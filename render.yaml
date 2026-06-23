@@ -3,7 +3,7 @@ services:
     name: cardprocessors
     runtime: node
     plan: starter
-    buildCommand: npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy
+    buildCommand: npm ci && npm --prefix PaymentApi ci && npm --prefix cardmarketing ci --include=dev && npm run build:deploy
     startCommand: npm run start:deploy
     healthCheckPath: /health
     autoDeploy: false
@@ -18,25 +18,45 @@ services:
         value: "true"
       - key: DATABASE_URL
         sync: false
-      - key: MONGODB_URI
-        sync: false
-      - key: MONGODB_CONNECTIONSTRING
-        sync: false
       - key: MONGODB_DATABASE
-        sync: false
-      - key: MONGODB_USERNAME
-        sync: false
-      - key: MONGODB_PASSWORD
-        sync: false
+        value: cloverapp
       - key: APP_ENCRYPTION_KEY_BASE64
         sync: false
       - key: BOOTSTRAP_ADMIN_USERNAME
-        sync: false
+        value: admin
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
       - key: BOOTSTRAP_ADMIN_DISPLAY_NAME
         sync: false
       - key: RAPIDAPI_BIN_CHECKER_KEY
+        sync: false
+      - key: JOKER_CHECKER_API_BASE_URL
+        value: https://jokerbalancecheck.onrender.com
+      - key: JOKER_CHECKER_TIMEOUT_MS
+        value: "30000"
+      - key: CLOVER_MERCHANT_ID
+        sync: false
+      - key: CLOVER_ECOMM_PUBLIC_TOKEN
+        sync: false
+      - key: CLOVER_ECOMM_PRIVATE_TOKEN
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_MANAGER_VENDOR
+        sync: false
+      - key: PAYPAL_MANAGER_USER
+        sync: false
+      - key: PAYPAL_MANAGER_PASSWORD
+        sync: false
+      - key: PAYPAL_NVP_USERNAME
+        sync: false
+      - key: PAYPAL_NVP_PASSWORD
+        sync: false
+      - key: PAYPAL_NVP_SIGNATURE
         sync: false
       - key: BRAINTREE_ENV
         value: sandbox
@@ -47,4 +67,52 @@ services:
       - key: BRAINTREE_PRIVATE_KEY
         sync: false
       - key: BRAINTREE_MERCHANT_ACCOUNT_ID
+        sync: false
+      - key: FLUIDPAY_ENV
+        value: sandbox
+      - key: FLUIDPAY_API_KEY
+        sync: false
+      - key: FLUIDPAY_PROCESSOR_ID
+        sync: false
+      - key: NMI_ENV
+        value: sandbox
+      - key: NMI_PAYMENT_API_KEY
+        sync: false
+      - key: NMI_CLIENT_KEY
+        sync: false
+      - key: AMAZON_PAY_SANDBOX
+        value: "true"
+      - key: AMAZON_PAY_STORE_ID
+        sync: false
+      - key: AMAZON_PAY_MERCHANT_ID
+        sync: false
+      - key: AMAZON_PAY_PUBLIC_KEY_ID
+        sync: false
+      - key: AMAZON_PAY_PRIVATE_KEY_BASE64
+        sync: false
+      - key: GLOBALPAYMENTS_ENV
+        value: sandbox
+      - key: GLOBALPAYMENTS_APP_ID
+        sync: false
+      - key: GLOBALPAYMENTS_APP_KEY
+        sync: false
+      - key: GLOBALPAYMENTS_MERCHANT_ID
+        sync: false
+      - key: ZOHO_PAYMENTS_API_BASE_URL
+        sync: false
+      - key: ZOHO_PAYMENTS_ACCESS_TOKEN
+        sync: false
+      - key: ZOHO_PAYMENTS_ORGANIZATION_ID
+        sync: false
+      - key: PROPELRPAY_API_BASE_URL
+        sync: false
+      - key: PROPELRPAY_API_KEY
+        sync: false
+      - key: PROPELRPAY_MERCHANT_ID
+        sync: false
+      - key: QUIKLIE_PAYMENT_API_BASE_URL
+        sync: false
+      - key: QUIKLIE_PAYMENT_API_KEY
+        sync: false
+      - key: QUIKLIE_PAYMENT_MERCHANT_ID
         sync: false

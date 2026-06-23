@@ -25,22 +25,28 @@ npm run up
 Render uses:
 
 ```sh
-npm install && npm --prefix PaymentApi install && npm --prefix cardmarketing install --include=dev && npm run build:deploy
+npm ci && npm --prefix PaymentApi ci && npm --prefix cardmarketing ci --include=dev && npm run build:deploy
 npm run start:deploy
 ```
 
-`start:deploy` runs MongoDB index migration before starting the Express server.
+`start:deploy` validates required secrets, runs MongoDB index migration, and only
+starts Express if both checks pass. A broken database configuration now fails
+the deploy instead of reporting a false successful migration.
+
+In production, `PaymentApi/.env` is intentionally ignored. The migration and
+server use only environment variables supplied by Render. `LOAD_DOTENV=true`
+may be used explicitly for a local production-mode test.
 
 ## Required Environment Variables
 
 ```env
 NODE_ENV=production
 APP_ENV=production
-DATABASE_URL=mongodb+srv://...
+DATABASE_URL=mongodb+srv://DB_USERNAME:URL_ENCODED_DB_PASSWORD@paymentmanger.gvaavzc.mongodb.net/?retryWrites=true&w=majority&appName=paymentmanger
 MONGODB_DATABASE=cloverapp
 APP_ENCRYPTION_KEY_BASE64=base64-32-byte-key
 BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=change-this
+BOOTSTRAP_ADMIN_PASSWORD=at-least-12-characters
 BOOTSTRAP_ADMIN_DISPLAY_NAME=System Admin
 ```
 
@@ -65,6 +71,48 @@ BRAINTREE_MERCHANT_ACCOUNT_ID=...
 ```
 
 Other supported providers keep their existing env names from `PaymentApi/src/config/env.js`.
+The Blueprint exposes the primary variables for Clover, PayPal, Braintree,
+FluidPay, NMI, Amazon Pay, Global Payments, Zoho, PropelrPay and Quiklie.
+Leave an unused provider's values blank; its row will show `not_configured`.
+
+Joker Checker needs no secret and defaults to:
+
+```env
+JOKER_CHECKER_API_BASE_URL=https://jokerbalancecheck.onrender.com
+JOKER_CHECKER_TIMEOUT_MS=30000
+```
+
+## Atlas Requirements
+
+- Add Render's outbound access to the Atlas Network Access list. For the first
+  deploy, `0.0.0.0/0` is the simplest test setting; restrict it afterward.
+- Create/use an Atlas **Database Access** user. This is not your Atlas website
+  login.
+- Set only one database connection variable on Render: `DATABASE_URL`.
+- Put the database username and URL-encoded password directly in that URL.
+- Delete old `MONGODB_URI`, `MONGODB_CONNECTIONSTRING`, `MONGODB_USERNAME`, and
+  `MONGODB_PASSWORD` values from the Render service to avoid stale auth.
+- Do not use an X.509 connection string unless the certificate file is also
+  available to the Render service.
+
+If the password contains characters such as `@`, `:`, `/`, `?`, `#`, `%`, or
+`&`, URL-encode it before placing it in `DATABASE_URL`:
+
+```sh
+node -p "encodeURIComponent('YOUR_DATABASE_PASSWORD')"
+```
+
+## Deploy Verification
+
+After Render reports `Live`, verify:
+
+```sh
+curl -fsS https://cardprocessors.onrender.com/health
+curl -I https://cardprocessors.onrender.com/react/
+curl -I https://cardprocessors.onrender.com/docs
+```
+
+`/health` must return HTTP 200 with `services.mongo.ok: true`.
 
 ## Production URL
 

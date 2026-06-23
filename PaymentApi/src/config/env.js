@@ -3,10 +3,14 @@ const dotenv = require("dotenv");
 
 const nodeEnv = process.env.NODE_ENV || "development";
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-dotenv.config({
-  path: path.resolve(process.cwd(), `.env.${nodeEnv}`),
-  override: true
-});
+
+const shouldLoadEnvSpecificDotenv = nodeEnv !== "production" || process.env.LOAD_DOTENV === "true";
+if (shouldLoadEnvSpecificDotenv) {
+  dotenv.config({
+    path: path.resolve(process.cwd(), `.env.${nodeEnv}`),
+    override: true
+  });
+}
 
 const paypalEnv = process.env.PAYPAL_ENV || "live";
 const fluidpayEnv = process.env.FLUIDPAY_ENV || "sandbox";
@@ -88,11 +92,38 @@ function mongoClientCertificateKeyFile() {
 }
 
 function getRawDatabaseUrl() {
+  const localDatabaseUrl = optionalEnv("LOCAL_DATABASE_URL") ||
+    (optionalEnv("MONGODB_URI").includes("localhost") || optionalEnv("MONGODB_URI").includes("127.0.0.1")
+      ? optionalEnv("MONGODB_URI")
+      : "") ||
+    (optionalEnv("MONGO_URL").includes("localhost") || optionalEnv("MONGO_URL").includes("127.0.0.1")
+      ? optionalEnv("MONGO_URL")
+      : "");
+
+  if (!boolEnv("MONGODB_USE_REMOTE", true) && localDatabaseUrl) {
+    return localDatabaseUrl;
+  }
+
   return optionalEnv("DATABASE_URL") ||
     optionalEnv("MONGODB_CONNECTIONSTRING") ||
     optionalEnv("MONGODB_URI") ||
     optionalEnv("MONGO_URL");
 }
+
+function resolveMongoSource(databaseUrl) {
+  if (!boolEnv("MONGODB_USE_REMOTE", true)) {
+    return "local";
+  }
+
+  try {
+    const parsed = new URL(databaseUrl);
+    return ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname) ? "local" : "live";
+  } catch (_error) {
+    return "live";
+  }
+}
+
+const resolvedDatabaseUrl = resolveDatabaseUrl();
 
 function resolveDatabaseUrl() {
   const rawDatabaseUrl = getRawDatabaseUrl();
@@ -127,7 +158,7 @@ function resolveDatabaseUrl() {
 module.exports = {
   nodeEnv: optionalEnv("NODE_ENV", nodeEnv),
   port: Number(optionalEnv("PORT", "3000")),
-  databaseUrl: resolveDatabaseUrl(),
+  databaseUrl: resolvedDatabaseUrl,
   databaseName: optionalEnv("MONGODB_DATABASE", databaseName),
   mongo: {
     serverSelectionTimeoutMs: Number(optionalEnv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "10000")),
@@ -136,7 +167,7 @@ module.exports = {
       const rawDatabaseUrl = getRawDatabaseUrl() || "";
       return rawDatabaseUrl.includes("MONGODB-X509") && !hasMongoClientCertificateConfig() && Boolean(optionalEnv("MONGODB_USERNAME") && optionalEnv("MONGODB_PASSWORD"));
     })(),
-    source: "live"
+    source: resolveMongoSource(resolvedDatabaseUrl)
   },
   encryptionKeyBase64: requireEnv("APP_ENCRYPTION_KEY_BASE64"),
   bootstrapAdmin: {
@@ -330,6 +361,10 @@ module.exports = {
         transaction: optionalEnv("QUIKLIE_PAYMENT_TRANSACTION_PATH") || optionalEnv("QUIKLIE_TRANSACTION_PATH") || optionalEnv("QUICKLIE_PAYMENT_TRANSACTION_PATH") || optionalEnv("QUICKLIE_TRANSACTION_PATH", "/api/v1/transaction-status/:transactionId"),
         verifyOtp: optionalEnv("QUIKLIE_PAYMENT_VERIFY_OTP_PATH") || optionalEnv("QUIKLIE_VERIFY_OTP_PATH") || optionalEnv("QUICKLIE_PAYMENT_VERIFY_OTP_PATH") || optionalEnv("QUICKLIE_VERIFY_OTP_PATH", "/api/v1/verify-otp")
       }
+    },
+    jokerChecker: {
+      baseUrl: optionalEnv("JOKER_CHECKER_API_BASE_URL", "https://jokerbalancecheck.onrender.com"),
+      timeoutMs: Number(optionalEnv("JOKER_CHECKER_TIMEOUT_MS", "30000"))
     },
     deepseeker: {
       baseUrl: optionalEnv("DEEPSEEKER_API_BASE_URL", "https://api.deepseeker.com/v1"),
