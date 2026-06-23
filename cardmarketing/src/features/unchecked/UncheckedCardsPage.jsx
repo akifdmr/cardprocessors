@@ -626,11 +626,11 @@ export function UncheckedCardsPage({ user, runAction }) {
         try {
           const payload = await api('/unchecked-cards', {
             method: 'POST',
-            body: JSON.stringify({ cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' }),
+            body: JSON.stringify({ cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'preauth' }),
           })
           pushRequestLog({
             action: 'Add + Live Check',
-            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' } },
+            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'preauth' } },
             response: payload,
             ok: !payload.errors?.length,
             status: payload.status || 'created',
@@ -654,7 +654,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           const payload = error.data || { message: error.message, status: error.status }
           pushRequestLog({
             action: 'Add + Live Check Failed',
-            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'verification' } },
+            request: { endpoint: '/api/unchecked-cards', body: { cardsText: line, provider: 'clover', autoLiveCheck: true, liveMode: 'preauth' } },
             response: payload,
             ok: false,
             status: error.status || 'failed',
@@ -711,7 +711,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           end: range.end,
           delayMs: range.delayMs,
           provider: 'clover',
-          liveMode: 'verification',
+          liveMode: 'preauth',
         }
         const payload = await api('/unchecked-cards/check-range', {
           method: 'POST',
@@ -750,7 +750,7 @@ export function UncheckedCardsPage({ user, runAction }) {
           ids,
           delayMs: range.delayMs,
           provider: 'clover',
-          liveMode: 'verification',
+          liveMode: 'preauth',
         }
         const payload = await api('/unchecked-cards/live-check-selected', {
           method: 'POST',

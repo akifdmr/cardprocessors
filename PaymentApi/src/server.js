@@ -5757,8 +5757,28 @@ function serviceResultText(result = {}) {
   ].filter(Boolean).join(" ").trim();
 }
 
+function serviceResultReason(result = {}) {
+  return [
+    result.live?.responseMessage,
+    result.live?.failureReason,
+    result.live?.error,
+    result.live?.message,
+    result.live?.resultCode,
+    result.live?.result?.responseMessage,
+    result.live?.result?.failureReason,
+    result.live?.result?.message,
+    result.live?.providerResponse?.responseMessage,
+    result.live?.providerResponse?.failureReason,
+    result.live?.providerResponse?.message,
+    result.error,
+    result.message
+  ].filter(Boolean).map((value) => String(value).trim()).find(Boolean) || null;
+}
+
 function uncheckedOperatorResult({ live = false, result = {}, error = null } = {}) {
-  const text = serviceResultText(error ? { error: error.message, live: error.data || {} } : result).toLowerCase();
+  const source = error ? { error: error.message, live: error.data || {} } : result;
+  const text = serviceResultText(source).toLowerCase();
+  const reason = serviceResultReason(source);
   const missingInfo = [
     "required",
     "missing",
@@ -5781,13 +5801,15 @@ function uncheckedOperatorResult({ live = false, result = {}, error = null } = {
   if (missingInfo) {
     return {
       operatorStatus: "not_processed",
-      operatorMessage: "İşlem alınmadı: bilgi veya POS tokeni eksik. Farklı POS cihazında denenebilir."
+      operatorMessage: `İşlem alınmadı: ${reason || "bilgi veya POS tokeni eksik"}. Farklı POS cihazında denenebilir.`
     };
   }
 
   return {
     operatorStatus: "close",
-    operatorMessage: "CLOSE: Bu POS cevabına göre kart onay almadı."
+    operatorMessage: reason
+      ? `CLOSE: ${reason}`
+      : "CLOSE: Bu POS cevabına göre kart onay almadı."
   };
 }
 
