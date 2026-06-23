@@ -4,7 +4,7 @@ const { client, ensureMongoSchema, getMongoStatus } = require("../src/db");
 
 function isCreateIndexPermissionError(error) {
   const message = String(error?.message || "");
-  return /not allowed to do action \[createIndex\]|createIndex.*not authorized|unauthorized/i.test(message);
+  return /not allowed to do action \[createIndex\]|createIndex(?:es)?.*(?:not authorized|requires authentication)|unauthorized/i.test(message);
 }
 
 async function migrate() {
