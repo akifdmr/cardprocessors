@@ -35,6 +35,7 @@ const callRoutes = require("./routers/callRoutes");
 const { createCloverLearningRouter } = require("./api/clover/learning/routes");
 const {
   SESSION_COOKIE_NAME,
+  PROJECTS,
   PROJECT_KEYS,
   authenticate,
   createSession,
@@ -3546,6 +3547,10 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
     projectPermissions: req.user.projectPermissions || {},
     session: req.session
   });
+});
+
+app.get("/api/auth/projects", requireAuth, (_req, res) => {
+  res.json({ projects: PROJECTS });
 });
 
 app.get("/api/provider-router/status", requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {

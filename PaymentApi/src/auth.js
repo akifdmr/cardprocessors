@@ -4,7 +4,24 @@ const env = require("./config/env");
 
 const SESSION_TTL_DAYS = 7;
 const SESSION_COOKIE_NAME = "clover_panel_session";
-const PROJECT_KEYS = ["jokerpayment", "balanceChecker", "loginpanelchecker"];
+const PROJECTS = [
+  {
+    key: "jokerpayment",
+    label: "Joker Payment",
+    url: "https://www.jokerpayment.cloud/"
+  },
+  {
+    key: "balanceChecker",
+    label: "Balance Checker",
+    url: "https://jokerbalancecheck.onrender.com"
+  },
+  {
+    key: "loginpanelchecker",
+    label: "Panel Login Checker",
+    url: "https://loginpanelcheckers.onrender.com"
+  }
+];
+const PROJECT_KEYS = PROJECTS.map((project) => project.key);
 const DEFAULT_PROJECT_KEY = "jokerpayment";
 const ROLE_PERMISSIONS = {
   admin: {
@@ -62,6 +79,8 @@ function normalizeProjectKey(value) {
     balance_checker: "balanceChecker",
     balance: "balanceChecker",
     loginpanelchecker: "loginpanelchecker",
+    panelloginchecker: "loginpanelchecker",
+    panelLoginChecker: "loginpanelchecker",
     login_panel_checker: "loginpanelchecker",
     loginpanel: "loginpanelchecker",
     joker: "jokerpayment",
@@ -387,6 +406,7 @@ function requirePermission(permission) {
 
 module.exports = {
   DEFAULT_PROJECT_KEY,
+  PROJECTS,
   PROJECT_KEYS,
   ROLE_PERMISSIONS,
   USER_PERMISSION_KEYS,

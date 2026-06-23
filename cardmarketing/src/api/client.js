@@ -1,5 +1,22 @@
 const PROJECT_STORAGE_KEY = 'cardmarket.projectKey'
 const DEFAULT_PROJECT_KEY = 'jokerpayment'
+export const projectOptions = [
+  {
+    key: 'jokerpayment',
+    label: 'Joker Payment',
+    url: 'https://www.jokerpayment.cloud/',
+  },
+  {
+    key: 'balanceChecker',
+    label: 'Balance Checker',
+    url: 'https://jokerbalancecheck.onrender.com',
+  },
+  {
+    key: 'loginpanelchecker',
+    label: 'Panel Login Checker',
+    url: 'https://loginpanelcheckers.onrender.com',
+  },
+]
 
 export function getActiveProjectKey() {
   return localStorage.getItem(PROJECT_STORAGE_KEY) || DEFAULT_PROJECT_KEY

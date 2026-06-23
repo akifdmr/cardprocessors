@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api/client'
+import { api, projectOptions } from '../../api/client'
 
 const roles = ['admin', 'operator', 'customer']
-const projects = [
-  ['jokerpayment', 'Joker Payment'],
-  ['balanceChecker', 'Balance Checker'],
-  ['loginpanelchecker', 'Login Panel Checker'],
-]
+const projects = projectOptions.map((project) => [project.key, project.label, project.url])
 
 const roleDefaultPermissions = {
   admin: {
@@ -182,9 +178,10 @@ function PermissionMatrix({ value, disabled = false, onChange }) {
 function ProjectPermissionMatrix({ value, disabled = false, onChange }) {
   return (
     <div className="project-permission-grid">
-      {projects.map(([projectKey, label]) => (
+      {projects.map(([projectKey, label, url]) => (
         <div className="project-permission-card" key={projectKey}>
           <strong>{label}</strong>
+          <span className="muted">{url}</span>
           <PermissionMatrix
             value={value?.[projectKey] || {}}
             disabled={disabled}

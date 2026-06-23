@@ -1,3 +1,5 @@
+import { projectOptions } from '../../api/client'
+
 const routes = [
   ['checkers', 'Card Checkers'],
   ['unchecked-cards', 'Unchecked Cards'],
@@ -10,13 +12,8 @@ const routes = [
   ['ollama-chat', 'AI Chat'],
 ]
 
-const projectOptions = [
-  ['jokerpayment', 'Joker Payment'],
-  ['balanceChecker', 'Balance Checker'],
-  ['loginpanelchecker', 'Login Panel Checker'],
-]
-
 export function AppShell({ user, route, setRoute, projectKey, onProjectChange, onLogout, children }) {
+  const activeProject = projectOptions.find((project) => project.key === (projectKey || user.projectKey))
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -28,8 +25,9 @@ export function AppShell({ user, route, setRoute, projectKey, onProjectChange, o
           <span>{user.displayName || user.username}</span>
           <strong>{user.role}</strong>
           <select value={projectKey || user.projectKey || 'jokerpayment'} onChange={(event) => onProjectChange(event.target.value)}>
-            {projectOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            {projectOptions.map((project) => <option key={project.key} value={project.key}>{project.label}</option>)}
           </select>
+          {activeProject?.url ? <a className="ghost small" href={activeProject.url} target="_blank" rel="noreferrer">Aç</a> : null}
           <button className="ghost small" type="button" onClick={onLogout}>Logout</button>
         </div>
       </header>
