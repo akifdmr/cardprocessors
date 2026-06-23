@@ -2249,6 +2249,28 @@ function redactSensitiveReportData(value, key = "") {
   return value;
 }
 
+function redactDebugRecord(value, key = "") {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactDebugRecord(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [
+      entryKey,
+      redactDebugRecord(entryValue, entryKey)
+    ]));
+  }
+  if (/encrypted|hash|cvv|cvv2|cvc|password|secret|signature|apikey|api_key|token|source/i.test(key)) {
+    return value ? "[redacted]" : value;
+  }
+  if (/pan|cardnumber|card_number/i.test(key)) {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (digits.length >= 12) {
+      return `**** **** **** ${digits.slice(-4)}`;
+    }
+  }
+  return value;
+}
+
 function redactProcessorDebugModel(value, key = "") {
   if (Array.isArray(value)) {
     return value.map((item) => redactProcessorDebugModel(item));
@@ -7016,6 +7038,42 @@ app.get("/api/checked-live-cards", requireAuth, requirePermission("canListCards"
   });
 }));
 
+app.get("/api/checked-live-cards/:cardId/debug", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+
+  const mongo = await db.getDb();
+  const card = await mongo.collection("checkedLiveCards").findOne(
+    { id: req.params.cardId },
+    { projection: { _id: 0 } }
+  );
+  if (!card) {
+    return res.status(404).json({ status: "failed", responseMessage: "Checked live card not found" });
+  }
+
+  const linkedUncheckedCard = card.uncheckedCardId
+    ? await mongo.collection("uncheckedCards").findOne({ id: card.uncheckedCardId }, { projection: { _id: 0 } })
+    : await mongo.collection("uncheckedCards").findOne({
+      bin: card.bin,
+      last4: card.last4,
+      ...(card.expMonth ? { expMonth: { $in: expLookupValues(card.expMonth) } } : {}),
+      ...(card.expYear ? { expYear: { $in: expLookupValues(card.expYear) } } : {})
+    }, { projection: { _id: 0 } });
+  const auditLogs = await listAuditLogs({
+    entityType: "checked_live_card",
+    entityId: card.id,
+    limit: 50
+  });
+
+  res.json({
+    status: "ok",
+    checkedLiveCard: redactDebugRecord(card),
+    linkedUncheckedCard: linkedUncheckedCard ? redactDebugRecord(linkedUncheckedCard) : null,
+    auditLogs: redactDebugRecord(auditLogs)
+  });
+}));
+
 app.get("/api/checked-cards", requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
   const mongo = await db.getDb();
   const { page, pageSize, skip } = paginationFromQuery(req.query);
@@ -7445,7 +7503,28 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
   if (providerOperation === "balance") statePatch.balance = approved ? "checked" : "review";
 
   await mongo.collection("checkedLiveCards").updateOne({ id: card.id }, { $set: statePatch });
-  res.status(httpStatus).json(payload);
+  await writeAuditLog({
+    entityType: "checked_live_card",
+    entityId: card.id,
+    action: `checked_live_card_${providerOperation}`,
+    status: approved ? "success" : (payload?.status || "review"),
+    actorUserId: req.user?.id || null,
+    details: redactSensitiveReportData({
+      request: providerPayloadFromMaskedRecord(providerCard, provider, providerOperation, req.body),
+      response: payload,
+      checkedLiveCardPatch: statePatch
+    })
+  });
+
+  res.status(httpStatus).json({
+    ...payload,
+    checkedCard: {
+      id: card.id,
+      provider,
+      operation: providerOperation,
+      state: statePatch
+    }
+  });
 }));
 
 app.post("/api/provider-operations/cards", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {

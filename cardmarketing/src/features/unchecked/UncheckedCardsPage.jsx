@@ -442,6 +442,7 @@ export function UncheckedCardsPage({ user, runAction }) {
   const [search, setSearch] = useState('')
   const [prompt, setPrompt] = useState(null)
   const [result, setResult] = useState(null)
+  const [debugLog, setDebugLog] = useState(null)
   const [uncheckedError, setUncheckedError] = useState('')
   const [checkedLiveError, setCheckedLiveError] = useState('')
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -579,6 +580,33 @@ export function UncheckedCardsPage({ user, runAction }) {
         await reloadAll()
       }
     }, { label: `${nextPrompt.action} çalışıyor`, variant: 'transaction', detail: `${nextPrompt.provider} provider isteği gönderiliyor` })
+  }
+
+  async function openCheckedLiveDebug(card) {
+    if (user?.role !== 'admin') return
+    await withLoader(async () => {
+      try {
+        const payload = await api(`/checked-live-cards/${card.id}/debug`)
+        setDebugLog({ title: `${card.maskedPan || card.id} Debug Log`, payload })
+        pushRequestLog({
+          action: 'Live Record Debug',
+          request: { endpoint: `/api/checked-live-cards/${card.id}/debug` },
+          response: payload,
+          ok: true,
+          status: payload.status || 'ok',
+        })
+      } catch (error) {
+        const payload = error.data || { message: error.message, status: error.status }
+        setDebugLog({ title: 'Debug Log Failed', payload })
+        pushRequestLog({
+          action: 'Live Record Debug Failed',
+          request: { endpoint: `/api/checked-live-cards/${card.id}/debug` },
+          response: payload,
+          ok: false,
+          status: error.status || 'failed',
+        })
+      }
+    }, { label: 'Live record logları alınıyor', variant: 'logs', detail: 'Admin debug datası yükleniyor' })
   }
 
   async function addCards() {
@@ -925,6 +953,7 @@ export function UncheckedCardsPage({ user, runAction }) {
                       {canRunAuthCheck && checkedLiveCanRun(card, 'auth') ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>Auth</button> : null}
                       {canRunAuthCheck && checkedLiveCanRun(card, 'capture') ? <button className="small ghost" type="button" onClick={() => openPrompt('capture', card)}>Capture</button> : null}
                       {canRunAuthCheck && checkedLiveCanRun(card, 'void') ? <button className="small ghost" type="button" onClick={() => openPrompt('void', card)}>Void</button> : null}
+                      {user?.role === 'admin' ? <button className="small ghost" type="button" onClick={() => openCheckedLiveDebug(card)}>Log</button> : null}
                       {!checkedLiveCanRun(card, 'capture') && !checkedLiveCanRun(card, 'void') ? <span className="muted">Auth sonrası capture/void</span> : null}
                     </div>
                   </td>
@@ -939,6 +968,7 @@ export function UncheckedCardsPage({ user, runAction }) {
         </section>
       </div>
       <RequestLogPanel logs={requestLogs} title="Unchecked Logs" />
+      <ResultModal value={debugLog} onClose={() => setDebugLog(null)} />
       {addModalOpen && (
         <AddCardsModal
           value={cardsText}
