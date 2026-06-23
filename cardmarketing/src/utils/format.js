@@ -30,7 +30,7 @@ export function formatCardLabel(card) {
 export function statusClass(status) {
   const value = String(status || '').toLowerCase()
   if (['approved', 'verified', 'passed', 'success', 'captured', 'recorded', 'configured', 'healthy'].includes(value)) return 'good'
-  if (['declined', 'failed', 'invalid', 'error', 'missing config', 'unhealthy'].includes(value)) return 'bad'
+  if (['declined', 'failed', 'invalid', 'error', 'unhealthy'].includes(value)) return 'bad'
   return 'warn'
 }
 

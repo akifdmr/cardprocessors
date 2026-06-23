@@ -2113,8 +2113,8 @@ async function runPaymentProcessorHealthChecks(reason = "startup") {
       paymentProcessorHealth.processors[descriptor.key] = {
         key: descriptor.key,
         label: catalogItem.label,
-        status: "unhealthy",
-        healthy: false,
+        status: "missing_config",
+        healthy: null,
         configured: false,
         checkedAt: new Date().toISOString(),
         message: "missing configuration",
