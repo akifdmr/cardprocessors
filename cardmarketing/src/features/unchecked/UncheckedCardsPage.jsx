@@ -424,13 +424,9 @@ export function UncheckedCardsPage({ user, runAction }) {
   const [requestLogs, setRequestLogs] = useState([])
   const [cardsText, setCardsText] = useState('')
   const [range, setRange] = useState({ start: '1', end: '10', delayMs: '750' })
-  const [selectedUncheckedIds, setSelectedUncheckedIds] = useState([])
   const withLoader = runAction || ((task) => task())
   const canCreateCards = Boolean(user?.permissions?.canCreateCards)
   const canRunAuthCheck = Boolean(user?.permissions?.canRunAuthCheck)
-  const selectableUncheckedRows = unchecked.rows.filter(() => canRunAuthCheck)
-  const selectedUncheckedSet = useMemo(() => new Set(selectedUncheckedIds), [selectedUncheckedIds])
-  const allVisibleUncheckedSelected = selectableUncheckedRows.length > 0 && selectableUncheckedRows.every((card) => selectedUncheckedSet.has(card.id))
 
   function pushRequestLog({ action, request, response, ok = true, status = 'ok' }) {
     setRequestLogs((current) => [{
@@ -485,26 +481,6 @@ export function UncheckedCardsPage({ user, runAction }) {
       provider: 'clover',
       amount: ['unchecked-live', 'auth', 'capture'].includes(kind) ? '1.00' : '0.00',
       transactionId: card.providerReferenceId || '',
-    })
-  }
-
-  function toggleUncheckedSelection(cardId, checked) {
-    setSelectedUncheckedIds((current) => {
-      const next = new Set(current)
-      if (checked) next.add(cardId)
-      else next.delete(cardId)
-      return [...next]
-    })
-  }
-
-  function toggleVisibleUncheckedSelection(checked) {
-    setSelectedUncheckedIds((current) => {
-      const next = new Set(current)
-      for (const card of selectableUncheckedRows) {
-        if (checked) next.add(card.id)
-        else next.delete(card.id)
-      }
-      return [...next]
     })
   }
 
@@ -712,46 +688,6 @@ export function UncheckedCardsPage({ user, runAction }) {
     }, { label: 'CheckCard çalışıyor', variant: 'transaction', detail: 'Kartlar sırayla liveCheck ve binCheck servislerinden geçiriliyor' })
   }
 
-  async function checkSelectedCards() {
-    const ids = selectedUncheckedIds
-    if (!ids.length) return
-
-    await withLoader(async () => {
-      try {
-        const body = {
-          ids,
-          delayMs: range.delayMs,
-          provider: 'clover',
-          liveMode: 'preauth',
-        }
-        const payload = await api('/unchecked-cards/live-check-selected', {
-          method: 'POST',
-          body: JSON.stringify(body),
-        })
-        pushRequestLog({
-          action: 'Selected Live Check',
-          request: { endpoint: '/api/unchecked-cards/live-check-selected', body },
-          response: payload,
-          ok: true,
-          status: payload.status || 'completed',
-        })
-        setResult({ title: 'Selected Live Check Result', payload })
-        setSelectedUncheckedIds([])
-        await reloadAll()
-      } catch (error) {
-        const payload = error.data || { message: error.message, status: error.status }
-        pushRequestLog({
-          action: 'Selected Live Check Failed',
-          request: { endpoint: '/api/unchecked-cards/live-check-selected', ids },
-          response: payload,
-          ok: false,
-          status: error.status || 'failed',
-        })
-        setResult({ title: 'Selected Live Check Failed', payload })
-      }
-    }, { label: 'Seçili kartlar check ediliyor', variant: 'transaction', detail: `${ids.length} kart liveCheck ve binCheck servislerinden geçiriliyor` })
-  }
-
   return (
     <div className="unchecked-page-grid">
       <div className="page-stack">
@@ -768,9 +704,6 @@ export function UncheckedCardsPage({ user, runAction }) {
         </div>
         {canRunAuthCheck && <div className="unchecked-checkbar">
           <button type="button" onClick={checkRange}>CheckCard</button>
-          <button type="button" className="ghost" onClick={checkSelectedCards} disabled={!selectedUncheckedIds.length}>
-            Seçili Live Check{selectedUncheckedIds.length ? ` (${selectedUncheckedIds.length})` : ''}
-          </button>
           <label>
             Başlangıç
             <input type="number" min="1" value={range.start} onChange={(event) => setRange((current) => ({ ...current, start: event.target.value }))} />
@@ -788,22 +721,11 @@ export function UncheckedCardsPage({ user, runAction }) {
           <table className="unchecked-cards-table">
             <thead>
               <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    aria-label="Sayfadaki kartları seç"
-                    checked={allVisibleUncheckedSelected}
-                    disabled={!selectableUncheckedRows.length}
-                    onChange={(event) => toggleVisibleUncheckedSelection(event.target.checked)}
-                  />
-                </th>
                 <th>Kart</th>
                 <th>Banka / Ülke</th>
                 <th>Son Kullanma</th>
                 <th>Durum</th>
-                <th>Provizyon</th>
-                <th>Reference</th>
-                <th>Son Sonuç</th>
+                <th>Provizyon / Ref</th>
                 <th>İşlemler</th>
               </tr>
             </thead>
@@ -811,18 +733,9 @@ export function UncheckedCardsPage({ user, runAction }) {
               {unchecked.rows.map((card) => (
                 <tr key={`unchecked-${card.id}`}>
                   <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`${card.maskedPan} seç`}
-                      checked={selectedUncheckedSet.has(card.id)}
-                      disabled={!canRunAuthCheck}
-                      onChange={(event) => toggleUncheckedSelection(card.id, event.target.checked)}
-                    />
-                  </td>
-                  <td>
                     <div className="unchecked-identity">
                       <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
-                      <span className="unchecked-meta">{cardMeta(card)}</span>
+                      <span className="unchecked-meta">{card.exp || '-'} · {cardMeta(card)}</span>
                     </div>
                   </td>
                   <td>
@@ -832,21 +745,14 @@ export function UncheckedCardsPage({ user, runAction }) {
                     </div>
                   </td>
                   <td>
-                    <div className="unchecked-identity">
-                      <strong>{card.exp || '-'}</strong>
-                      <span className="unchecked-meta">ZIP {card.zip || 'yok'}</span>
-                    </div>
+                    <strong>{card.exp || '-'}</strong>
                   </td>
                   <td>
-                    <div className="unchecked-status">
-                      <div className="unchecked-status-row"><span>Checked</span><StatusPill value={card.checked} /></div>
-                      <div className="unchecked-status-row"><span>Live</span><StatusPill value={card.live} /></div>
-                    </div>
+                    <StatusPill value={card.operatorStatus || (card.live ? 'live' : 'pending')} />
                   </td>
-                  <td>-</td>
-                  <td className="mono" title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
-                  <td className="checked-live-result" title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
-                    {truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || '-', 40)}
+                  <td className="checked-live-result" title={card.operatorMessage || card.lastCheck?.operatorMessage || card.providerReferenceId || ''}>
+                    <strong>-</strong>
+                    <span className="unchecked-meta">{truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || card.providerReferenceId || '-', 48)}</span>
                   </td>
                   <td>
                     {canRunAuthCheck
@@ -859,11 +765,10 @@ export function UncheckedCardsPage({ user, runAction }) {
               ))}
               {checkedLive.rows.map((card) => (
                 <tr key={`live-${card.id}`}>
-                  <td><span className="muted">-</span></td>
                   <td>
                     <div className="unchecked-identity">
                       <strong className="mono">{card.maskedPan || `${card.bin || '------'}******${card.last4 || '----'}`}</strong>
-                      <span className="unchecked-meta">{cardMeta(card)}</span>
+                      <span className="unchecked-meta">{card.exp || '-'} · {cardMeta(card)}</span>
                     </div>
                   </td>
                   <td>
@@ -873,16 +778,12 @@ export function UncheckedCardsPage({ user, runAction }) {
                     </div>
                   </td>
                   <td>
-                    <div className="unchecked-identity">
-                      <strong>{card.exp || '-'}</strong>
-                      <span className="unchecked-meta">ZIP {card.zip || 'yok'}</span>
-                    </div>
+                    <strong>{card.exp || '-'}</strong>
                   </td>
                   <td><StatusPill value={checkedLiveStatus(card)} /></td>
-                  <td><strong>{checkedLiveAmount(card)}</strong></td>
-                  <td className="mono" title={card.providerReferenceId || ''}>{truncateText(card.providerReferenceId, 25)}</td>
-                  <td className="checked-live-result" title={card.lastMessage || card.lastResult?.responseMessage || ''}>
-                    {truncateText(card.lastMessage || card.lastResult?.responseMessage || '-', 40)}
+                  <td className="checked-live-result" title={[card.providerReferenceId, card.lastMessage || card.lastResult?.responseMessage].filter(Boolean).join(' · ')}>
+                    <strong>{checkedLiveAmount(card)}</strong>
+                    <span className="unchecked-meta mono">{truncateText(card.providerReferenceId, 22)}</span>
                   </td>
                   <td>
                     <div className="checked-live-actions">
@@ -896,9 +797,9 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="9" className="muted">{uncheckedError}</td></tr>}
-              {checkedLiveError && <tr><td colSpan="9" className="muted">{checkedLiveError}</td></tr>}
-              {!unchecked.rows.length && !checkedLive.rows.length && !uncheckedError && !checkedLiveError && <tr><td colSpan="9" className="muted">Kayıt yok</td></tr>}
+              {uncheckedError && <tr><td colSpan="6" className="muted">{uncheckedError}</td></tr>}
+              {checkedLiveError && <tr><td colSpan="6" className="muted">{checkedLiveError}</td></tr>}
+              {!unchecked.rows.length && !checkedLive.rows.length && !uncheckedError && !checkedLiveError && <tr><td colSpan="6" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>
