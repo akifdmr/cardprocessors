@@ -3,6 +3,94 @@ import { api } from '../../api/client'
 
 const roles = ['admin', 'operator', 'customer']
 
+const roleDefaultPermissions = {
+  admin: {
+    canManageUsers: true,
+    canCreateCards: true,
+    canListCards: true,
+    canCreateEnrollment: true,
+    canViewEnrollment: true,
+    canUpdateEnrollment: true,
+    canRunLiveCheck: true,
+    canRunBinCheck: true,
+    canRunBalanceCheck: true,
+    canViewBalance: true,
+    canRunAuthCheck: true,
+    canRunProcessorActions: true,
+    canViewProcessorDebug: true,
+  },
+  operator: {
+    canManageUsers: false,
+    canCreateCards: true,
+    canListCards: true,
+    canCreateEnrollment: true,
+    canViewEnrollment: false,
+    canUpdateEnrollment: false,
+    canRunLiveCheck: true,
+    canRunBinCheck: true,
+    canRunBalanceCheck: true,
+    canViewBalance: false,
+    canRunAuthCheck: false,
+    canRunProcessorActions: false,
+    canViewProcessorDebug: false,
+  },
+  customer: {
+    canManageUsers: false,
+    canCreateCards: true,
+    canListCards: true,
+    canCreateEnrollment: false,
+    canViewEnrollment: false,
+    canUpdateEnrollment: false,
+    canRunLiveCheck: false,
+    canRunBinCheck: false,
+    canRunBalanceCheck: false,
+    canViewBalance: false,
+    canRunAuthCheck: false,
+    canRunProcessorActions: false,
+    canViewProcessorDebug: false,
+  },
+}
+
+const permissionGroups = [
+  {
+    title: 'Yönetim',
+    items: [
+      ['canManageUsers', 'Kullanıcı yönetimi'],
+      ['canListCards', 'Kart listeleme'],
+      ['canCreateCards', 'Kart ekleme'],
+    ],
+  },
+  {
+    title: 'Checker',
+    items: [
+      ['canRunBinCheck', 'BIN check'],
+      ['canRunLiveCheck', 'Live check'],
+      ['canRunAuthCheck', 'Auth / provizyon'],
+      ['canRunBalanceCheck', 'Balance check'],
+      ['canViewBalance', 'Balance görüntüleme'],
+    ],
+  },
+  {
+    title: 'Enrollment',
+    items: [
+      ['canCreateEnrollment', 'Enrollment oluşturma'],
+      ['canViewEnrollment', 'Enrollment görüntüleme'],
+      ['canUpdateEnrollment', 'Enrollment güncelleme'],
+    ],
+  },
+  {
+    title: 'Processor',
+    items: [
+      ['canRunProcessorActions', 'Processor action'],
+      ['canViewProcessorDebug', 'Debug görüntüleme'],
+    ],
+  },
+]
+
+function defaultPermissionsForRole(role) {
+  return { ...(roleDefaultPermissions[role] || roleDefaultPermissions.operator) }
+}
+
 const rolePermissions = {
   admin: [
     'Kullanıcı ve rol yönetimi',
@@ -30,17 +118,47 @@ const emptyUser = {
   role: 'operator',
   canBalanceCheck: false,
   canViewBalance: false,
+  permissionOverrides: defaultPermissionsForRole('operator'),
   isActive: true,
 }
 
 function toFormUser(user) {
+  const role = user.role || 'operator'
+  const permissionOverrides = {
+    ...defaultPermissionsForRole(role),
+    ...(user.permission_overrides || {}),
+  }
   return {
     displayName: user.display_name || '',
-    role: user.role || 'operator',
+    role,
     canBalanceCheck: Boolean(user.can_balance_check),
     canViewBalance: Boolean(user.can_view_balance),
+    permissionOverrides,
     isActive: user.is_active !== false,
   }
+}
+
+function PermissionMatrix({ value, disabled = false, onChange }) {
+  return (
+    <div className="permission-matrix">
+      {permissionGroups.map((group) => (
+        <div className="permission-group" key={group.title}>
+          <strong>{group.title}</strong>
+          {group.items.map(([key, label]) => (
+            <label className="inline-check" key={key}>
+              <input
+                type="checkbox"
+                checked={Boolean(value?.[key])}
+                disabled={disabled}
+                onChange={(event) => onChange({ ...value, [key]: event.target.checked })}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function UserRow({ user, currentUserId, onSave, onPassword }) {
@@ -60,13 +178,28 @@ function UserRow({ user, currentUserId, onSave, onPassword }) {
       </td>
       <td><input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></td>
       <td>
-        <select value={form.role} disabled={isSelf} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+        <select
+          value={form.role}
+          disabled={isSelf}
+          onChange={(event) => {
+            const role = event.target.value
+            setForm({ ...form, role, permissionOverrides: defaultPermissionsForRole(role) })
+          }}
+        >
           {roles.map((role) => <option key={role} value={role}>{role}</option>)}
         </select>
       </td>
       <td>
-        <label className="inline-check"><input type="checkbox" checked={form.canBalanceCheck} onChange={(event) => setForm({ ...form, canBalanceCheck: event.target.checked })} /> Balance check</label>
-        <label className="inline-check"><input type="checkbox" checked={form.canViewBalance} onChange={(event) => setForm({ ...form, canViewBalance: event.target.checked })} /> Balance view</label>
+        <PermissionMatrix
+          value={form.permissionOverrides}
+          disabled={form.role === 'admin'}
+          onChange={(permissionOverrides) => setForm({
+            ...form,
+            permissionOverrides,
+            canBalanceCheck: permissionOverrides.canRunBalanceCheck,
+            canViewBalance: permissionOverrides.canViewBalance,
+          })}
+        />
       </td>
       <td>
         <label className="inline-check">
@@ -173,9 +306,37 @@ export function UserManagementPage({ user, runAction }) {
           <label><span>Username</span><input required value={form.username} autoComplete="off" onChange={(event) => setForm({ ...form, username: event.target.value.trim() })} /></label>
           <label><span>Display name</span><input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label>
           <label><span>Password</span><input required minLength="8" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
-          <label><span>Role</span><select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
-          <label className="inline-check"><input type="checkbox" checked={form.canBalanceCheck} onChange={(event) => setForm({ ...form, canBalanceCheck: event.target.checked })} /> Balance check yetkisi</label>
-          <label className="inline-check"><input type="checkbox" checked={form.canViewBalance} onChange={(event) => setForm({ ...form, canViewBalance: event.target.checked })} /> Balance görüntüleme</label>
+          <label>
+            <span>Role</span>
+            <select
+              value={form.role}
+              onChange={(event) => {
+                const role = event.target.value
+                setForm({
+                  ...form,
+                  role,
+                  permissionOverrides: defaultPermissionsForRole(role),
+                  canBalanceCheck: roleDefaultPermissions[role]?.canRunBalanceCheck || false,
+                  canViewBalance: roleDefaultPermissions[role]?.canViewBalance || false,
+                })
+              }}
+            >
+              {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+            </select>
+          </label>
+          <div className="full">
+            <span className="field-label">İşlem yetkileri</span>
+            <PermissionMatrix
+              value={form.permissionOverrides}
+              disabled={form.role === 'admin'}
+              onChange={(permissionOverrides) => setForm({
+                ...form,
+                permissionOverrides,
+                canBalanceCheck: permissionOverrides.canRunBalanceCheck,
+                canViewBalance: permissionOverrides.canViewBalance,
+              })}
+            />
+          </div>
           <label className="inline-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} /> Aktif kullanıcı</label>
           <button className="primary" type="submit">Kullanıcı Ekle</button>
         </form>
@@ -214,7 +375,7 @@ export function UserManagementPage({ user, runAction }) {
                 <th>Kullanıcı</th>
                 <th>Display</th>
                 <th>Rol</th>
-                <th>Ek Yetki</th>
+                <th>İşlem Yetkileri</th>
                 <th>Durum</th>
                 <th>Şifre Reset</th>
                 <th></th>

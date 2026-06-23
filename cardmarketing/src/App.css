@@ -283,6 +283,38 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
 .user-create-form {
   align-items: end;
 }
+.field-label {
+  display: block;
+  color: #8ea79b;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.permission-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.permission-group {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  border: 1px solid rgba(152, 176, 164, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.permission-group strong {
+  color: #f3fff8;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.permission-group .inline-check {
+  min-height: 24px;
+  white-space: normal;
+}
 .role-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -311,6 +343,11 @@ th { color: #8ea49a; font-size: 12px; text-transform: uppercase; }
 .user-management-table th,
 .user-management-table td {
   white-space: nowrap;
+  vertical-align: top;
+}
+.user-management-table td:nth-child(4) {
+  min-width: 520px;
+  white-space: normal;
 }
 .user-management-table input,
 .user-management-table select {

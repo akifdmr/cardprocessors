@@ -51,6 +51,7 @@ const ROLE_PERMISSIONS = {
     canViewProcessorDebug: false
   }
 };
+const USER_PERMISSION_KEYS = Object.keys(ROLE_PERMISSIONS.admin);
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const derived = crypto.scryptSync(password, salt, 64).toString("hex");
@@ -95,11 +96,22 @@ function getEffectivePermissions(user) {
       ? base.canViewBalance && (user.can_view_balance ?? false)
       : base.canViewBalance;
 
-  return {
+  const permissions = {
     ...base,
     canRunBalanceCheck,
     canViewBalance
   };
+
+  const overrides = user.permission_overrides && typeof user.permission_overrides === "object"
+    ? user.permission_overrides
+    : {};
+  for (const key of USER_PERMISSION_KEYS) {
+    if (typeof overrides[key] === "boolean") {
+      permissions[key] = overrides[key];
+    }
+  }
+
+  return permissions;
 }
 
 async function ensureBootstrapAdmin() {
@@ -327,6 +339,7 @@ function requirePermission(permission) {
 
 module.exports = {
   ROLE_PERMISSIONS,
+  USER_PERMISSION_KEYS,
   SESSION_COOKIE_NAME,
   authenticate,
   createSession,

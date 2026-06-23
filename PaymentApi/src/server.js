@@ -41,7 +41,8 @@ const {
   getEffectivePermissions,
   hashPassword,
   requireAuth,
-  requirePermission
+  requirePermission,
+  USER_PERMISSION_KEYS
 } = require("./auth");
 
 const app = express();
@@ -991,6 +992,17 @@ function serializeRawResponse(rawResponse) {
   }
 
   return JSON.stringify(rawResponse);
+}
+
+function normalizePermissionOverrides(value = {}) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    USER_PERMISSION_KEYS
+      .filter((key) => typeof value[key] === "boolean")
+      .map((key) => [key, value[key]])
+  );
 }
 
 function deserializeRawResponse(rawResponse) {
@@ -8606,10 +8618,12 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     role,
     canBalanceCheck = false,
     canViewBalance = false,
+    permissionOverrides = {},
     isActive = true
   } = req.body;
   const normalizedUsername = String(username || "").trim();
   const normalizedRole = String(role || "").trim();
+  const normalizedPermissionOverrides = normalizePermissionOverrides(permissionOverrides);
 
   if (!normalizedUsername || !password || !normalizedRole) {
     return sendApiError(res, req, 400, "username, password and role are required", "VALIDATION_ERROR");
@@ -8624,29 +8638,23 @@ app.post("/api/users", requireAuth, requirePermission("canManageUsers"), asyncHa
     return sendApiError(res, req, 409, "Username already exists", "USERNAME_EXISTS");
   }
 
-  const result = await query(
-    `insert into users (
-      username,
-      password_hash,
-      display_name,
-      role,
-      can_balance_check,
-      can_view_balance,
-      is_active
-    ) values ($1, $2, $3, $4, $5, $6, $7)
-    returning id`,
-    [
-      normalizedUsername,
-      hashPassword(password),
-      displayName || null,
-      normalizedRole,
-      Boolean(canBalanceCheck),
-      Boolean(canViewBalance),
-      Boolean(isActive)
-    ]
-  );
+  const database = await db.getDb();
+  const id = uuidv4();
+  await database.collection("users").insertOne({
+    id,
+    username: normalizedUsername,
+    password_hash: hashPassword(password),
+    display_name: displayName || null,
+    role: normalizedRole,
+    can_balance_check: Boolean(canBalanceCheck),
+    can_view_balance: Boolean(canViewBalance),
+    permission_overrides: normalizedPermissionOverrides,
+    is_active: Boolean(isActive),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
 
-  res.status(201).json({ id: result.rows[0].id });
+  res.status(201).json({ id });
 }));
 
 app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers"), asyncHandler(async (req, res) => {
@@ -8656,8 +8664,10 @@ app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers")
     role,
     canBalanceCheck = false,
     canViewBalance = false,
+    permissionOverrides = {},
     isActive = true
   } = req.body;
+  const normalizedPermissionOverrides = normalizePermissionOverrides(permissionOverrides);
 
   if (!["admin", "operator", "customer"].includes(role)) {
     return sendApiError(res, req, 400, "Unsupported role", "UNSUPPORTED_ROLE");
@@ -8680,6 +8690,7 @@ app.patch("/api/users/:userId", requireAuth, requirePermission("canManageUsers")
         role,
         can_balance_check: Boolean(canBalanceCheck),
         can_view_balance: Boolean(canViewBalance),
+        permission_overrides: normalizedPermissionOverrides,
         is_active: Boolean(isActive),
         updated_at: new Date().toISOString()
       }
