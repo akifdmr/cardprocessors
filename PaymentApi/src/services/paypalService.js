@@ -39,14 +39,6 @@ function inputError(message) {
   return error;
 }
 
-function requireRapidApiBinCheckerKey() {
-  const apiKey = process.env.RAPIDAPI_BIN_CHECKER_KEY || process.env.X_RAPIDAPI_KEY;
-  if (!apiKey) {
-    throw inputError("Missing RAPIDAPI_BIN_CHECKER_KEY");
-  }
-  return apiKey;
-}
-
 function getRapidApiBinCheckerKey() {
   return process.env.RAPIDAPI_BIN_CHECKER_KEY || process.env.X_RAPIDAPI_KEY || null;
 }
@@ -245,6 +237,34 @@ function formatOfflineBinData(bin) {
   };
 }
 
+function paypalBinPrefixResult(normalized, lookupIp = "") {
+  const offlineData = formatOfflineBinData(normalized);
+  const summary = normalizeBinSummary(summarizeBinDetails(normalized, offlineData));
+  return {
+    status: "fallback",
+    bin: normalized,
+    ip: lookupIp || null,
+    resultCode: "PAYPAL_BIN_PREFIX_FALLBACK",
+    confidence: "medium",
+    dataQuality: "network_only",
+    sourceLabel: "PayPal card-network prefix",
+    summary: {
+      ...summary,
+      country: null,
+      countryCode: null,
+      issuer: null,
+      type: null,
+      level: null,
+      currency: null,
+      usefulLabel: summary.brand || summary.scheme || "Unknown network"
+    },
+    details: formatBinDetails(normalized, offlineData),
+    ipDetails: lookupIp ? formatIpDetails({}) : null,
+    source: "paypal_bin_prefix",
+    raw: null
+  };
+}
+
 function getBinPayload(responseData) {
   return responseData?.BIN || responseData?.bin || responseData?.data || responseData?.result || responseData || {};
 }
@@ -406,10 +426,11 @@ async function binCheckCard({ pan, bin, ip }) {
 
   let response;
   const rapidApiKey = getRapidApiBinCheckerKey();
+  if (!rapidApiKey) {
+    return rememberBinResult(normalized, paypalBinPrefixResult(normalized, lookupIp), !lookupIp);
+  }
+
   try {
-    if (!rapidApiKey) {
-      throw inputError("Missing RAPIDAPI_BIN_CHECKER_KEY");
-    }
     response = await axios.post(RAPIDAPI_BIN_CHECKER_URL, requestBody, {
       params: requestParams,
       headers: {
