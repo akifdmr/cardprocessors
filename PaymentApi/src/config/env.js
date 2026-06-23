@@ -143,6 +143,17 @@ function resolveDatabaseUrl() {
   const username = optionalEnv("MONGODB_USERNAME");
   const password = optionalEnv("MONGODB_PASSWORD");
 
+  if ((!parsed.username || !parsed.password) && username && password) {
+    parsed.username = username;
+    parsed.password = password;
+    const authSource = parsed.searchParams.get("authSource");
+    if (!authSource || authSource === "$external") {
+      parsed.searchParams.set("authSource", "admin");
+    }
+    parsed.searchParams.delete("authMechanism");
+    return parsed.toString();
+  }
+
   if (isX509 && !hasMongoClientCertificateConfig() && username && password) {
     parsed.username = username;
     parsed.password = password;
