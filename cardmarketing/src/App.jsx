@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, getActiveProjectKey, setActiveProjectKey } from './api/client'
+import { api, getActiveProjectKey, projectOptions, setActiveProjectKey } from './api/client'
 import './App.css'
 import { ActionLoader } from './components/common/ActionLoader'
 import { AppShell } from './components/layout/AppShell'
@@ -14,6 +14,26 @@ import { UserManagementPage } from './features/users/UserManagementPage'
 // Yeni sayfalar
 import { PerfectGeneratorPage } from './features/checkers/PerfectGeneratorPage'
 import { OllamaChatPage } from './features/ollamaChat/OllamaChatPage'
+
+function hasAnyPermission(permissions = {}) {
+  return Object.values(permissions || {}).some((value) => value === true)
+}
+
+function firstAllowedProject(user, preferredProjectKey) {
+  if (user?.role === 'admin') {
+    return projectOptions.find((project) => project.key === preferredProjectKey) || projectOptions[0]
+  }
+
+  const projectPermissions = user?.projectPermissions || {}
+  const hasProjectScopedPermissions = Object.keys(projectPermissions).length > 0
+  const preferredProject = projectOptions.find((project) => project.key === preferredProjectKey)
+  if (preferredProject && hasAnyPermission(projectPermissions[preferredProject.key] || (!hasProjectScopedPermissions ? user?.permissions : {}))) {
+    return preferredProject
+  }
+
+  return projectOptions.find((project) => hasAnyPermission(projectPermissions[project.key])) ||
+    (!hasProjectScopedPermissions && hasAnyPermission(user?.permissions) ? projectOptions[0] : null)
+}
 
 export default function App() {
   const [route, setRoute] = useState('checkers')
@@ -75,12 +95,18 @@ export default function App() {
     setLoginError('')
     await run(async () => {
       try {
+        setActiveProjectKey(projectKey)
         const response = await api('/auth/login', { method: 'POST', body: JSON.stringify(login) })
         if (!response?.user) {
           throw new Error(response?.error || response?.responseMessage || 'Login cevabı kullanıcı bilgisi içermiyor.')
         }
-        setUser(response.user)
-        await loadBaseData()
+        const targetProject = firstAllowedProject(response.user, projectKey)
+        if (!targetProject) {
+          throw new Error('Bu kullanıcı için tanımlı proje yetkisi yok.')
+        }
+        setActiveProjectKey(targetProject.key)
+        setProjectKeyState(targetProject.key)
+        window.location.assign(targetProject.url)
       } catch (error) {
         setLoginError(error.message)
       }
@@ -117,7 +143,10 @@ export default function App() {
   if (!user) {
     return (
       <>
-        <LoginPage login={login} setLogin={setLogin} error={loginError} onSubmit={submitLogin} />
+        <LoginPage login={login} setLogin={setLogin} error={loginError} onSubmit={submitLogin} projectKey={projectKey} setProjectKey={(nextProjectKey) => {
+          setActiveProjectKey(nextProjectKey)
+          setProjectKeyState(nextProjectKey)
+        }} />
         <ActionLoader active={busy} label={busyLabel} variant={busyVariant} detail={busyDetail} />
       </>
     )
