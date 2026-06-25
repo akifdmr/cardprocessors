@@ -17,6 +17,7 @@ const fluidpayEnv = process.env.FLUIDPAY_ENV || "sandbox";
 const globalPaymentsEnv = process.env.GLOBALPAYMENTS_ENV || "sandbox";
 const braintreeEnv = process.env.BRAINTREE_ENV || "sandbox";
 const nmiEnv = process.env.NMI_ENV || "production";
+const authorizeNetEnv = process.env.AUTHORIZE_NET_ENV || process.env.AUTHORIZENET_ENV || process.env.AUTHORIZE_ENV || "sandbox";
 const zohoPaymentsEnv = process.env.ZOHO_PAYMENTS_ENV || process.env.ZOHO_PAYMENT_ENV || "production";
 const amazonPayPublicKeyId = optionalEnv("AMAZON_PAY_PUBLIC_KEY_ID") || optionalEnv("AMAZON_PAY_APIKEY");
 const amazonPaySandboxEnv = optionalEnv("AMAZON_PAY_SANDBOX");
@@ -287,6 +288,21 @@ module.exports = {
       transactionPath: optionalEnv("NMI_TRANSACTION_PATH", "/api/transact.php"),
       queryPath: optionalEnv("NMI_QUERY_PATH", "/api/query.php"),
       defaultBillingCountry: optionalEnv("NMI_DEFAULT_BILLING_COUNTRY", "US")
+    },
+    authorizenet: {
+      environment: authorizeNetEnv,
+      baseUrl: optionalEnv(
+        "AUTHORIZE_NET_API_BASE_URL",
+        authorizeNetEnv === "production"
+          ? "https://api.authorize.net/xml/v1/request.api"
+          : "https://apitest.authorize.net/xml/v1/request.api"
+      ),
+      apiLoginId: optionalEnv("AUTHORIZE_NET_API_LOGIN_ID") || optionalEnv("AUTHORIZENET_API_LOGIN_ID") || optionalEnv("AUTHORIZE_LOGIN_ID"),
+      transactionKey: optionalEnv("AUTHORIZE_NET_TRANSACTION_KEY") || optionalEnv("AUTHORIZENET_TRANSACTION_KEY") || optionalEnv("AUTHORIZE_TRANSACTION_KEY"),
+      publicClientKey: optionalEnv("AUTHORIZE_NET_PUBLIC_CLIENT_KEY") || optionalEnv("AUTHORIZENET_PUBLIC_CLIENT_KEY") || optionalEnv("AUTHORIZE_PUBLIC_CLIENT_KEY"),
+      signatureKey: optionalEnv("AUTHORIZE_NET_SIGNATURE_KEY") || optionalEnv("AUTHORIZENET_SIGNATURE_KEY"),
+      timeoutMs: Number(optionalEnv("AUTHORIZE_NET_TIMEOUT_MS") || optionalEnv("AUTHORIZENET_TIMEOUT_MS", "180000")),
+      verificationAmount: optionalEnv("AUTHORIZE_NET_VERIFICATION_AMOUNT") || optionalEnv("AUTHORIZENET_VERIFICATION_AMOUNT", "0.01")
     },
     zoho: {
       baseUrl: optionalEnv("ZOHO_PAYMENTS_API_BASE_URL") ||

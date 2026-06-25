@@ -43,6 +43,7 @@ const fieldLabels = {
   phone: 'Phone',
   transactionReferenceId: 'Transaction Reference',
   customerReferenceId: 'Customer Reference',
+  last4: 'Card Last 4',
   otp: 'OTP',
 }
 
@@ -74,6 +75,7 @@ function normalizedProvider(providerKey) {
   if (key === 'propelr') return 'propelrpay'
   if (key === 'global-payments' || key === 'portico') return 'globalpayments'
   if (key === 'networkmerchants' || key === 'network-merchants') return 'nmi'
+  if (key === 'authorize.net' || key === 'authorize-net' || key === 'authorize_net' || key === 'authnet' || key === 'anet') return 'authorizenet'
   if (key === 'zohopayments' || key === 'zoho-payments' || key === 'zoho_payment') return 'zoho'
   if (key === 'amazon' || key === 'amazon-pay' || key === 'amazon_pay' || key === 'amazonpayments') return 'amazonpay'
   if (key === 'quikliepay' || key === 'quiklie-payment' || key === 'quicklie' || key === 'quickliepay' || key === 'quicklie-payment') return 'quiklie'

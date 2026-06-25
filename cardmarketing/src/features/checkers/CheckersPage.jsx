@@ -19,6 +19,7 @@ const tabs = [
 const liveProviders = [
   { value: 'clover', label: 'Clover' },
   { value: 'paypal', label: 'PayPal' },
+  { value: 'authorizenet', label: 'Authorize.net' },
   { value: 'amazonpay', label: 'Amazon Pay' },
 ]
 
@@ -301,6 +302,13 @@ function liveOperationsFor(provider) {
       { value: 'live', label: 'PayPal Live Check', amount: true },
       { value: 'auth', label: 'PayPal Auth', amount: true },
       { value: 'sale', label: 'PayPal Sale', amount: true },
+    ]
+  }
+  if (provider === 'authorizenet') {
+    return [
+      { value: 'verification', label: 'Authorize.net Verify', amount: false },
+      { value: 'auth', label: 'Authorize.net Auth', amount: true },
+      { value: 'sale', label: 'Authorize.net Sale', amount: true },
     ]
   }
   return [

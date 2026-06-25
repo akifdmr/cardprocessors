@@ -44,6 +44,11 @@ export const processorActionComponents = {
       return { ...withDefaultZip(payload), amount: payload.amount ? moneyValue(payload.amount) : payload.amount }
     },
   },
+  authorizenet: {
+    normalize(payload) {
+      return { ...withDefaultZip(payload), amount: payload.amount ? moneyValue(payload.amount) : payload.amount }
+    },
+  },
   zoho: {
     normalize(payload) {
       return { ...withDefaultZip(payload), amount: payload.amount ? moneyValue(payload.amount) : payload.amount }
@@ -93,6 +98,7 @@ export function normalizeProviderKey(provider) {
   if (key === 'propelr' || key === 'propelrpay') return 'propelrpay'
   if (key === 'globalpayments' || key === 'global-payments' || key === 'portico') return 'globalpayments'
   if (key === 'networkmerchants' || key === 'network-merchants') return 'nmi'
+  if (key === 'authorize.net' || key === 'authorize-net' || key === 'authorize_net' || key === 'authnet' || key === 'anet') return 'authorizenet'
   if (key === 'zohopayments' || key === 'zoho-payments' || key === 'zoho_payment') return 'zoho'
   if (key === 'amazon' || key === 'amazon-pay' || key === 'amazon_pay' || key === 'amazonpayments') return 'amazonpay'
   if (key === 'quikliepay' || key === 'quiklie-payment' || key === 'quicklie' || key === 'quickliepay' || key === 'quicklie-payment') return 'quiklie'

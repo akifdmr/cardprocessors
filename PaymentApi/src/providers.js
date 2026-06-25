@@ -88,6 +88,16 @@ function getPublicProviderConfig() {
       transactionPath: env.providers.nmi.transactionPath,
       queryPath: env.providers.nmi.queryPath
     },
+    authorizenet: {
+      baseUrl: env.providers.authorizenet.baseUrl,
+      environment: env.providers.authorizenet.environment,
+      configured: Boolean(env.providers.authorizenet.apiLoginId && env.providers.authorizenet.transactionKey),
+      apiLoginConfigured: Boolean(env.providers.authorizenet.apiLoginId),
+      transactionKeyConfigured: Boolean(env.providers.authorizenet.transactionKey),
+      publicClientKeyConfigured: Boolean(env.providers.authorizenet.publicClientKey),
+      signatureKeyConfigured: Boolean(env.providers.authorizenet.signatureKey),
+      verificationAmount: env.providers.authorizenet.verificationAmount
+    },
     zoho: {
       baseUrl: env.providers.zoho.baseUrl || null,
       accountsUrl: env.providers.zoho.accountsUrl || null,

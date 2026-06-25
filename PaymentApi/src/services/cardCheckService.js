@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const cloverService = require("./cloverService");
 const amazonPayService = require("./amazonPayService");
+const authorizeNetService = require("./authorizeNetService");
 const paypalService = require("./paypalService");
 const liveCheckerService = require("./liveCheckerService");
 const { db } = require("../db");
@@ -169,18 +170,32 @@ async function binCheckCard(payload = {}) {
   const card = payload.pan || payload.cardNumber ? normalizeCardInput(payload) : payload;
   const normalizedBin = digitsOnly(payload.bin || card.pan || payload.pan).slice(0, 6);
   const hasIpLookup = Boolean(String(payload.ip || "").trim());
+
   let database = null;
+
   try {
     database = await db.getDb();
+
     const cached = hasIpLookup
       ? null
-      : await database.collection("binLookupCache").findOne({ bin: normalizedBin }, { projection: { _id: 0 } });
+      : await database.collection("binLookupCache").findOne(
+          { bin: normalizedBin },
+          { projection: { _id: 0 } }
+        );
+
     if (cached?.result && Date.now() - new Date(cached.updatedAt).getTime() <= BIN_CACHE_MAX_AGE_MS) {
-      return enrichBinWithPayPalVault({
-        ...cached.result,
-        cached: true,
-        cacheSource: "mongodb"
-      }, payload);
+      const response = await enrichBinWithPayPalVault(
+        {
+          ...cached.result,
+          cached: true,
+          cacheSource: "mongodb"
+        },
+        payload
+      );
+
+      console.log("[BIN CHECK - CACHE HIT]", response);
+
+      return response;
     }
   } catch {
     database = null;
@@ -192,6 +207,7 @@ async function binCheckCard(payload = {}) {
     ip: payload.ip
   });
 
+  // fallback historical logic (aynı bırakıldı)
   if (["limited", "failed"].includes(String(result.status || "").toLowerCase()) && database) {
     const historical = await database.collection("uncheckedCards").findOne(
       {
@@ -212,8 +228,10 @@ async function binCheckCard(payload = {}) {
         }
       }
     );
+
     if (historical) {
       const network = result.summary?.brand || result.summary?.scheme || null;
+
       const recovered = {
         ...result,
         status: "fallback",
@@ -241,6 +259,7 @@ async function binCheckCard(payload = {}) {
           ].filter(Boolean).join(" / ")
         }
       };
+
       if (!hasIpLookup) {
         await database.collection("binLookupCache").updateOne(
           { bin: normalizedBin },
@@ -248,13 +267,19 @@ async function binCheckCard(payload = {}) {
           { upsert: true }
         );
       }
-      return enrichBinWithPayPalVault(recovered, payload);
+
+      const response = await enrichBinWithPayPalVault(recovered, payload);
+
+      console.log("[BIN CHECK - HISTORICAL FALLBACK]", response);
+
+      return response;
     }
   }
 
   if (!hasIpLookup && database && ["passed", "fallback"].includes(String(result.status || "").toLowerCase())) {
     const cacheResult = { ...result };
     delete cacheResult.raw;
+
     await database.collection("binLookupCache").updateOne(
       { bin: normalizedBin },
       { $set: { bin: normalizedBin, result: cacheResult, updatedAt: new Date().toISOString() } },
@@ -262,7 +287,12 @@ async function binCheckCard(payload = {}) {
     );
   }
 
-  return enrichBinWithPayPalVault(result, payload);
+  const response = await enrichBinWithPayPalVault(result, payload);
+
+  // 🔥 final response log
+  console.log("[BIN CHECK - LIVE RESULT]", response);
+
+  return response;
 }
 
 async function liveCheckCard(payload = {}) {
@@ -295,8 +325,31 @@ async function liveCheckCard(payload = {}) {
     };
   }
 
+  if (provider === "authorizenet") {
+    const operation = String(payload.operation || "verification").toLowerCase();
+    let result;
+    if (operation === "sale" || operation === "charge") {
+      result = await authorizeNetService.saleCard({ ...payload, amount, currency });
+    } else if (operation === "auth" || operation === "authorize" || operation === "live" || operation === "balance") {
+      result = await authorizeNetService.authorizeCard({ ...payload, amount, currency });
+    } else {
+      result = await authorizeNetService.verifyCard({
+        ...payload,
+        amount: payload.amount === undefined || payload.amount === null || payload.amount === "" ? undefined : amount,
+        currency
+      });
+    }
+    return {
+      ...result,
+      provider: "authorizenet",
+      operation: operation === "live" ? "auth" : operation,
+      providerReferenceId: result.transactionId || result.providerReferenceId || null,
+      isLive: liveCheckerService.isLiveResponse(result)
+    };
+  }
+
   if (provider !== "clover") {
-    throw inputError("liveCheck service supports clover or amazonpay");
+    throw inputError("liveCheck service supports clover, amazonpay or authorizenet");
   }
 
   const source = payload.source || payload.providerPaymentToken || payload.token;

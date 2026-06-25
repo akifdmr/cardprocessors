@@ -14,6 +14,7 @@ const fluidpayService = require("./services/fluidpayService");
 const braintreeService = require("./services/braintreeService");
 const unifiedPaymentProcessor = require("./services/unifiedPaymentProcessor");
 const nmiService = require("./services/nmiService");
+const authorizeNetService = require("./services/authorizeNetService");
 const zohoPaymentsService = require("./services/zohoPaymentsService");
 const amazonPayService = require("./services/amazonPayService");
 const globalPaymentsService = require("./services/globalPaymentsService");
@@ -129,7 +130,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "providerPaymentToken", "last4", "expMonth", "expYear"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "authorizenet", "zoho"] },
           providerPaymentToken: { type: "string" },
           last4: { type: "string" },
           expMonth: { type: "string" },
@@ -184,7 +185,7 @@ const openApiDocument = {
         type: "object",
         required: ["provider", "verificationStatus"],
         properties: {
-          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"] },
+          provider: { type: "string", enum: ["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "authorizenet", "zoho"] },
           verificationStatus: { type: "string", enum: ["pending", "verified", "declined", "review"] },
           providerReferenceId: { type: "string" },
           avsResult: { type: "string" },
@@ -1713,6 +1714,7 @@ function getProviderReportCatalog() {
   const fluidpayStatus = fluidpayService.getStatus();
   const braintreeStatus = braintreeService.getStatus();
   const nmiStatus = nmiService.getStatus();
+  const authorizeNetStatus = authorizeNetService.getStatus();
   const zohoStatus = zohoPaymentsService.getStatus();
   const amazonPayStatus = amazonPayService.getStatus();
   const globalPaymentsStatus = globalPaymentsService.getStatus();
@@ -1827,6 +1829,19 @@ function getProviderReportCatalog() {
         "Required: NMI_PAYMENT_API_KEY or NMI_SECURITY_KEY",
         "NMI_API_BASE_URL defaults to https://secure.nmi.com",
         "Sale/auth/validate/capture/refund/void use the NMI Payment API form endpoint"
+      ],
+      capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "verification", "transaction_detail"]
+    },
+    {
+      key: "authorizenet",
+      group: "payment_gateways",
+      label: "Authorize.net",
+      configured: authorizeNetStatus.configured,
+      missing: authorizeNetStatus.missing,
+      configNotes: [
+        "Required: AUTHORIZE_NET_API_LOGIN_ID/AUTHORIZE_LOGIN_ID and AUTHORIZE_NET_TRANSACTION_KEY/AUTHORIZE_TRANSACTION_KEY",
+        "AUTHORIZE_NET_ENV defaults to sandbox",
+        "Sale/auth/verification/capture/refund/void use Authorize.net Transaction API createTransactionRequest"
       ],
       capabilities: ["status", "test", "sale", "auth", "capture", "void", "refund", "verification", "transaction_detail"]
     },
@@ -2094,6 +2109,7 @@ function getPaymentProcessorHealthChecks() {
     { key: "fluidpay", check: () => fluidpayService.testConnection() },
     { key: "braintree", check: () => braintreeService.testConnection() },
     { key: "nmi", check: () => nmiService.testConnection() },
+    { key: "authorizenet", check: () => authorizeNetService.testConnection() },
     { key: "zoho", check: () => zohoPaymentsService.testConnection() },
     { key: "globalpayments", check: () => globalPaymentsService.testConnection() },
     { key: "propelrpay", check: () => propelrPayService.testConnection() },
@@ -2600,6 +2616,7 @@ function classifyAttemptProvider(attempt) {
   if (attempt.provider === "fluidpay") return "fluidpay";
   if (attempt.provider === "braintree") return "braintree";
   if (attempt.provider === "nmi") return "nmi";
+  if (attempt.provider === "authorizenet") return "authorizenet";
   if (attempt.provider === "zoho") return "zoho";
   if (attempt.provider === "globalpayments") return "globalpayments";
   if (attempt.provider === "propelrpay") return "propelrpay";
@@ -2711,6 +2728,19 @@ function requireNmiConfigured(res) {
   return true;
 }
 
+function requireAuthorizeNetConfigured(res) {
+  const status = authorizeNetService.getStatus();
+  if (!status.configured) {
+    res.status(400).json({
+      error: "Authorize.net configuration is incomplete",
+      missing: status.missing
+    });
+    return false;
+  }
+
+  return true;
+}
+
 function requireZohoConfigured(res) {
   const status = zohoPaymentsService.getStatus();
   if (!status.configured) {
@@ -2797,6 +2827,14 @@ function getCardProviderConfigStatus(provider) {
       configured: status.configured,
       missing: status.missing || [],
       message: "NMI configuration is incomplete"
+    };
+  }
+  if (provider === "authorizenet") {
+    const status = authorizeNetService.getStatus();
+    return {
+      configured: status.configured,
+      missing: status.missing || [],
+      message: "Authorize.net configuration is incomplete"
     };
   }
   if (provider === "zoho") {
@@ -3131,6 +3169,21 @@ const providerOperationCatalog = {
       { key: "transaction_detail", label: "Transaction Detail", operation: "transaction_detail", fields: ["transactionId"], required: ["transactionId"], features: ["Reads transaction details through /api/query.php"] }
     ]
   },
+  authorizenet: {
+    key: "authorizenet",
+    provider: "authorizenet",
+    label: "Authorize.net",
+    description: "Authorize.net Transaction API card operations using API Login ID and Transaction Key.",
+    methods: [
+      { key: "sale", label: "Auth + Capture", operation: "sale", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "cardholderName", "billingAddressLine1", "billingCity", "billingState", "billingCountry", "email", "phone"], required: ["pan", "expMonth", "expYear", "amount"], features: ["createTransactionRequest authCaptureTransaction", "Amount is decimal currency value"] },
+      { key: "auth", label: "Authorize", operation: "auth", fields: ["pan", "expMonth", "expYear", "cvv2", "amount", "currency", "billingZip", "cardholderName", "billingAddressLine1", "billingCity", "billingState", "billingCountry", "email", "phone"], required: ["pan", "expMonth", "expYear", "amount"], features: ["createTransactionRequest authOnlyTransaction", "Capture later by transaction id"] },
+      { key: "verification", label: "Verification Auth", operation: "verification", fields: ["pan", "expMonth", "expYear", "cvv2", "billingZip", "amount", "currency"], required: ["pan", "expMonth", "expYear", "cvv2"], features: ["Uses authOnlyTransaction", "Defaults to AUTHORIZE_NET_VERIFICATION_AMOUNT when amount is empty"] },
+      { key: "capture", label: "Capture", operation: "capture", fields: ["transactionId", "amount", "currency"], required: ["transactionId", "amount"], features: ["priorAuthCaptureTransaction by transaction id"] },
+      { key: "refund", label: "Refund", operation: "refund", fields: ["transactionId", "amount", "currency", "last4"], required: ["transactionId", "amount"], features: ["refundTransaction by transaction id", "last4 is sent when supplied"] },
+      { key: "void", label: "Void", operation: "void", fields: ["transactionId"], required: ["transactionId"], features: ["voidTransaction by transaction id"] },
+      { key: "transaction_detail", label: "Transaction Detail", operation: "transaction_detail", fields: ["transactionId"], required: ["transactionId"], features: ["getTransactionDetailsRequest by transaction id"] }
+    ]
+  },
   zoho: {
     key: "zoho",
     provider: "zoho",
@@ -3225,6 +3278,7 @@ function normalizeProviderKey(provider) {
   if (key === "propelr") return "propelrpay";
   if (key === "quikliepay" || key === "quiklie-payment" || key === "quicklie" || key === "quickliepay" || key === "quicklie-payment") return "quiklie";
   if (key === "networkmerchants" || key === "network-merchants") return "nmi";
+  if (key === "authorize.net" || key === "authorize-net" || key === "authorize_net" || key === "authnet" || key === "anet") return "authorizenet";
   if (key === "zohopayments" || key === "zoho-payments" || key === "zoho_payment") return "zoho";
   if (key === "amazon" || key === "amazon-pay" || key === "amazon_pay" || key === "amazonpayments") return "amazonpay";
   return key;
@@ -4404,7 +4458,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
   provider = normalizeProviderKey(provider);
   operation = String(operation || "").toLowerCase();
   try {
-  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "quiklie", "paypal", "amazonpay", "braintree", "nmi", "zoho"].includes(provider)) {
+  if (!["clover", "fluidpay", "globalpayments", "propelrpay", "quiklie", "paypal", "amazonpay", "braintree", "nmi", "authorizenet", "zoho"].includes(provider)) {
     const response = buildOperationResponseModel({
       operationId,
       provider: provider || req.body.provider || null,
@@ -4413,7 +4467,7 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
       result: {
         status: "failed",
         resultCode: "INVALID_PROVIDER",
-        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, quiklie, paypal, amazonpay, braintree, nmi or zoho"
+        responseMessage: "provider must be clover, fluidpay, globalpayments, propelr, propelrpay, quiklie, paypal, amazonpay, braintree, nmi, authorizenet or zoho"
       },
       request: req.body,
       logs: { audit: false, providerAttempt: false },
@@ -4581,6 +4635,15 @@ async function runProviderCardOperation(req, res, { provider, operation, skipBin
     if (operation === "capture") resultPromise = nmiService.captureTransaction(payload);
     if (operation === "refund") resultPromise = nmiService.refundTransaction(payload);
     if (operation === "void" || operation === "reversal") resultPromise = nmiService.voidTransaction(payload);
+  }
+  if (provider === "authorizenet") {
+    if (operation === "sale" || operation === "charge") resultPromise = authorizeNetService.saleCard(payload);
+    if (operation === "authorize" || operation === "auth" || operation === "balance") resultPromise = authorizeNetService.authorizeCard(payload);
+    if (operation === "verification" || operation === "verify" || operation === "live") resultPromise = authorizeNetService.verifyCard(payload);
+    if (operation === "capture") resultPromise = authorizeNetService.captureTransaction(payload);
+    if (operation === "refund") resultPromise = authorizeNetService.refundTransaction(payload);
+    if (operation === "void" || operation === "reversal") resultPromise = authorizeNetService.voidTransaction(payload);
+    if (operation === "transaction_detail") resultPromise = authorizeNetService.getTransaction(payload.transactionId || payload.retref);
   }
   if (provider === "zoho") {
     if (operation === "sale" || operation === "charge") resultPromise = zohoPaymentsService.saleCard(payload);
@@ -5246,6 +5309,50 @@ app.get("/api/providers/nmi/transactions/:transactionId", requireAuth, requirePe
     return;
   }
   const result = await nmiService.getTransaction(req.params.transactionId);
+  res.json(result);
+}));
+
+function authorizeNetCardRoute(operation) {
+  return asyncHandler(async (req, res) => {
+    await runProviderCardOperation(req, res, {
+      provider: "authorizenet",
+      operation
+    });
+  });
+}
+
+app.get(["/api/providers/authorizenet/status", "/api/providers/authorize-net/status", "/api/providers/authnet/status"], requireAuth, requirePermission("canListCards"), asyncHandler(async (_req, res) => {
+  res.json(authorizeNetService.getStatus());
+}));
+
+app.post(["/api/providers/authorizenet/test", "/api/providers/authorize-net/test", "/api/providers/authnet/test"], requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireAuthorizeNetConfigured(res)) {
+    return;
+  }
+
+  const result = await authorizeNetService.testConnection();
+  await writeAuditLog({
+    entityType: "provider",
+    entityId: "authorizenet",
+    action: "authorizenet_connection_test",
+    status: result.ok ? "success" : result.status || "unknown",
+    actorUserId: req.user.id,
+    details: result
+  });
+  res.status(result.ok === false ? 400 : 200).json(result);
+}));
+
+app.post(["/api/providers/authorizenet/cards/sale", "/api/providers/authorize-net/cards/sale", "/api/providers/authnet/cards/sale"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("sale"));
+app.post(["/api/providers/authorizenet/cards/auth", "/api/providers/authorize-net/cards/auth", "/api/providers/authnet/cards/auth"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("authorize"));
+app.post(["/api/providers/authorizenet/cards/verify", "/api/providers/authorize-net/cards/verify", "/api/providers/authnet/cards/verify"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("verification"));
+app.post(["/api/providers/authorizenet/cards/capture", "/api/providers/authorize-net/cards/capture", "/api/providers/authnet/cards/capture"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("capture"));
+app.post(["/api/providers/authorizenet/cards/refund", "/api/providers/authorize-net/cards/refund", "/api/providers/authnet/cards/refund"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("refund"));
+app.post(["/api/providers/authorizenet/cards/void", "/api/providers/authorize-net/cards/void", "/api/providers/authnet/cards/void"], requireAuth, requirePermission("canRunAuthCheck"), authorizeNetCardRoute("void"));
+app.get(["/api/providers/authorizenet/transactions/:transactionId", "/api/providers/authorize-net/transactions/:transactionId", "/api/providers/authnet/transactions/:transactionId"], requireAuth, requirePermission("canListCards"), asyncHandler(async (req, res) => {
+  if (!requireAuthorizeNetConfigured(res)) {
+    return;
+  }
+  const result = await authorizeNetService.getTransaction(req.params.transactionId);
   res.json(result);
 }));
 
@@ -8444,6 +8551,19 @@ app.get("/api/provider-reports", requireAuth, requirePermission("canListCards"),
         },
         missing: reportsByKey.nmi.missing
       },
+      authorizenet: {
+        required: ["AUTHORIZE_NET_API_LOGIN_ID or AUTHORIZE_LOGIN_ID", "AUTHORIZE_NET_TRANSACTION_KEY or AUTHORIZE_TRANSACTION_KEY"],
+        recommendedDev: {
+          AUTHORIZE_NET_ENV: env.providers.authorizenet.environment || "sandbox",
+          AUTHORIZE_NET_API_BASE_URL: env.providers.authorizenet.baseUrl || "https://apitest.authorize.net/xml/v1/request.api",
+          AUTHORIZE_NET_API_LOGIN_ID: env.providers.authorizenet.apiLoginId ? "configured" : "missing",
+          AUTHORIZE_NET_TRANSACTION_KEY: env.providers.authorizenet.transactionKey ? "configured" : "missing",
+          AUTHORIZE_NET_PUBLIC_CLIENT_KEY: env.providers.authorizenet.publicClientKey ? "configured" : "optional for Accept.js/client tokenization",
+          AUTHORIZE_NET_VERIFICATION_AMOUNT: env.providers.authorizenet.verificationAmount || "0.01",
+          AUTHORIZE_NET_TIMEOUT_MS: String(env.providers.authorizenet.timeoutMs || 180000)
+        },
+        missing: reportsByKey.authorizenet.missing
+      },
       zoho: {
         required: ["ZOHO_PAYMENTS_API_BASE_URL", "ZOHO_PAYMENTS_ACCESS_TOKEN or ZOHO_PAYMENTS_API_KEY or OAuth refresh credentials"],
         recommendedDev: {
@@ -9304,8 +9424,8 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
     return sendApiError(res, req, 400, "provider, providerPaymentToken, last4, expMonth and expYear are required", "VALIDATION_ERROR");
   }
 
-  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
+  if (!["clover", "paypal", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "authorizenet", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi, authorizenet or zoho", "INVALID_PROVIDER");
   }
 
   let verifyPayload = { ...req.body, provider, amount: req.body.amount || 1, currency: req.body.currency || "USD", ipAddress: req.ip };
@@ -9313,6 +9433,7 @@ app.post("/api/cards", requireAuth, requirePermission("canCreateCards"), asyncHa
   if (provider === "fluidpay") verificationPromise = fluidpayService.createTransaction(verifyPayload, "verification");
   else if (provider === "braintree") verificationPromise = braintreeService.verifyCard(verifyPayload);
   else if (provider === "nmi") verificationPromise = nmiService.verifyCard(verifyPayload);
+  else if (provider === "authorizenet") verificationPromise = authorizeNetService.verifyCard(verifyPayload);
   else if (provider === "zoho") verificationPromise = zohoPaymentsService.verifyCard(verifyPayload);
   else if (provider === "propelr" || provider === "propelrpay") verificationPromise = propelrPayService.verifyCard(verifyPayload);
   else if (provider === "quiklie") verificationPromise = quikliePaymentService.verifyCard(verifyPayload);
@@ -9546,8 +9667,8 @@ app.post("/api/cards/:cardId/provider-verification", requireAuth, requirePermiss
     notes
   } = req.body;
 
-  if (!provider || !["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "zoho"].includes(provider)) {
-    return sendApiError(res, req, 400, "provider must be clover, paypal, amazonpay, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi or zoho", "INVALID_PROVIDER");
+  if (!provider || !["clover", "paypal", "amazonpay", "fluidpay", "globalpayments", "propelr", "propelrpay", "quiklie", "braintree", "nmi", "authorizenet", "zoho"].includes(provider)) {
+    return sendApiError(res, req, 400, "provider must be clover, paypal, amazonpay, fluidpay, globalpayments, propelr, propelrpay, quiklie, braintree, nmi, authorizenet or zoho", "INVALID_PROVIDER");
   }
 
   if (!verificationStatus || !["pending", "verified", "declined", "review"].includes(verificationStatus)) {
